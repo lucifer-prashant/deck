@@ -41,7 +41,7 @@ const broadcast = (channel: string, payload: unknown) => {
   allWindows().forEach(w => { try { w.webContents.send(channel, payload) } catch { /* */ } })
 }
 
-const isDev = process.env.NODE_ENV !== 'production' || !app.isPackaged
+const isDev = !app.isPackaged
 
 function buildMenu() {
   const send = (command: string) => {
