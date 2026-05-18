@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { useWorkspaceStore } from '../store/workspaceStore'
 import { executeWorkspaceCommand } from '../workspaceCommands'
 import ThemeMenu from './ThemeMenu'
+import PresetsMenu from './PresetsMenu'
 import './StatusBar.css'
 
 const StatusBar: React.FC = () => {
@@ -19,6 +20,7 @@ const StatusBar: React.FC = () => {
 
   const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null)
   const [themeMenu, setThemeMenu] = useState<{ x: number; y: number } | null>(null)
+  const [presetsMenu, setPresetsMenu] = useState<{ x: number; y: number } | null>(null)
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -29,6 +31,21 @@ const StatusBar: React.FC = () => {
     window.addEventListener('mousemove', handler)
     return () => window.removeEventListener('mousemove', handler)
   }, [viewport.x, viewport.y, viewport.zoom])
+
+  useEffect(() => {
+    const handler = () => {
+      // Open presets menu centered above the presets button, triggered by Ctrl+S with no linked preset.
+      const btn = document.querySelector('.status-chip.presets-btn') as HTMLElement | null
+      if (btn) {
+        const r = btn.getBoundingClientRect()
+        setPresetsMenu({ x: r.left, y: r.top })
+      } else {
+        setPresetsMenu({ x: 100, y: window.innerHeight - 28 })
+      }
+    }
+    window.addEventListener('deck:open-presets-menu', handler)
+    return () => window.removeEventListener('deck:open-presets-menu', handler)
+  }, [])
 
   if (!statusBarVisible) return null
 
@@ -55,6 +72,14 @@ const StatusBar: React.FC = () => {
           onClick={() => loadPreset('no-life')}
           title="Open No-Life preset (Gmail · LinkedIn · GitHub · Reddit · VSCode · Terminal) — Ctrl+Shift+K"
         >⚒ no-life</button>
+        <button
+          className="status-chip ghost presets-btn"
+          onClick={(e) => {
+            const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+            setPresetsMenu({ x: r.left, y: r.top })
+          }}
+          title="Canvas presets — save and load your own layouts (Ctrl+S)"
+        >⊕ presets</button>
         <span className="status-sep" />
         <span className="status-item summary">{summary}</span>
       </div>
@@ -86,6 +111,7 @@ const StatusBar: React.FC = () => {
         <span className="status-item mono">{Math.round(viewport.zoom * 100)}%</span>
       </div>
       {themeMenu && <ThemeMenu anchor={themeMenu} onClose={() => setThemeMenu(null)} />}
+      {presetsMenu && <PresetsMenu anchor={presetsMenu} onClose={() => setPresetsMenu(null)} />}
     </div>
   )
 }

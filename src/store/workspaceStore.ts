@@ -1,5 +1,76 @@
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
+import { persist, createJSONStorage } from 'zustand/middleware'
+
+// Dual storage: writes to BOTH a flat JSON file (via Electron IPC) AND localStorage.
+// On read, prefers the file — localStorage is stored inside Chromium's LevelDB which
+// gets wiped whenever Chromium resets its quota database (common on Linux dev builds).
+// The file lives in ~/.config/deck/ alongside the app's own userData, unaffected by
+// Chromium storage quota resets.
+let _appDataHome: string | null = null
+const getAppDataHome = (): Promise<string | null> => {
+  if (_appDataHome !== null) return Promise.resolve(_appDataHome)
+  return (window.electronAPI?.fs?.home?.() ?? Promise.resolve(null))
+    .then(h => { _appDataHome = h ?? null; return _appDataHome })
+    .catch(() => { _appDataHome = null; return null })
+}
+
+// Pre-warm the home dir cache as soon as the module loads so the first setItem
+// file write doesn't block on an IPC round-trip.
+getAppDataHome().catch(() => null)
+
+// Returns true if the serialized zustand state has at least one panel somewhere.
+// Used to prevent writing/loading empty state to the backup file — if Chromium
+// quota-resets and wipes localStorage, the last known good file state is preserved.
+const hasAnyContent = (value: string): boolean => {
+  try {
+    const parsed = JSON.parse(value)
+    const state = parsed?.state
+    const tabs: Array<{ panels?: Record<string, unknown> }> = state?.tabs ?? []
+    const hasPanels = tabs.some(t => Object.keys(t.panels ?? {}).length > 0)
+    const hasPresets = Object.keys(state?.canvasPresets ?? {}).length > 0
+    return hasPanels || hasPresets
+  } catch { return false }
+}
+
+const dualStorage = {
+  getItem: (name: string): string | null | Promise<string | null> => {
+    // Fast path: localStorage is synchronous — use it if it has real data.
+    // This keeps startup instant in the normal case.
+    const lsData = localStorage.getItem(name)
+    if (lsData && hasAnyContent(lsData)) return lsData
+
+    // Slow path: localStorage is empty/wiped (Chromium quota reset) — recover from file.
+    const eapiFile = window.electronAPI?.file
+    if (!eapiFile?.read) return lsData
+    return getAppDataHome().then(home => {
+      if (!home) return lsData
+      return eapiFile.read(`${home}/.config/deck/${name}.json`)
+        .then(r => (r?.ok && r.content && hasAnyContent(r.content)) ? r.content : lsData)
+        .catch(() => lsData)
+    })
+  },
+  setItem: (name: string, value: string): void => {
+    localStorage.setItem(name, value)
+    // Only write to file when there's real content — prevents an empty-state write
+    // from wiping a previously good backup (e.g. after a Chromium quota reset).
+    if (!hasAnyContent(value)) return
+    const eapiW = window.electronAPI
+    getAppDataHome().then(home => {
+      if (home && eapiW?.file?.write) {
+        eapiW.file.write(`${home}/.config/deck/${name}.json`, value).catch(() => null)
+      }
+    }).catch(() => null)
+  },
+  removeItem: (name: string): void => {
+    localStorage.removeItem(name)
+    const eapiD = window.electronAPI
+    getAppDataHome().then(home => {
+      if (home && eapiD?.fs?.delete) {
+        eapiD.fs.delete(`${home}/.config/deck/${name}.json`).catch(() => null)
+      }
+    }).catch(() => null)
+  }
+}
 
 export type Theme = 'dark' | 'midnight' | 'light' | 'system'
 
@@ -84,6 +155,10 @@ export interface WorkspaceTab {
   // panels in a preset can be tracked in `presetGraveyards` and re-restored next time
   // the user loads the preset.
   kind?: 'preset:life' | 'preset:no-life'
+  // Id of a user-saved CanvasPreset. Set when the tab was created via loadCanvasPreset
+  // or when the user saves the current canvas via saveCanvasPreset. Used to overwrite
+  // the preset on Ctrl+S / "Save" without prompting for a name again.
+  linkedPresetId?: string
 }
 
 // Last-known state of preset panels the user has deleted. When the user re-runs
@@ -91,6 +166,15 @@ export interface WorkspaceTab {
 // restored from this graveyard at its last position/size — or from preset defaults
 // if it was never touched.
 export type PresetGraveyards = Record<string, Record<string, Partial<Panel>>>
+
+// User-saved canvas snapshot. Loaded into a new tab; browser panels start sleeping.
+export interface CanvasPreset {
+  id: string
+  name: string
+  savedAt: number
+  panels: Record<string, Panel>
+  viewport: Viewport
+}
 
 export interface JumpMode {
   active: boolean
@@ -144,6 +228,7 @@ export interface WorkspaceState {
   sidebarOpen: boolean
   sidebarSection: SidebarSection
   presetGraveyards: PresetGraveyards
+  canvasPresets: Record<string, CanvasPreset>
   // Per-section pin: when set, that section ignores active-panel changes and stays on its pinned target.
   sidebarPin: { explorer?: string; git?: string }
   hiddenSidebarSections: SidebarSection[]
@@ -217,6 +302,10 @@ export interface WorkspaceState {
   exportWorkspace: () => string
   importWorkspace: (json: string) => boolean
   markTabSaved: () => void
+  saveCanvasPreset: (name: string) => string
+  overwriteCanvasPreset: (id: string) => void
+  loadCanvasPreset: (id: string) => void
+  deleteCanvasPreset: (id: string) => void
 }
 
 const createEmptyTab = (title = 'Canvas'): WorkspaceTab => ({
@@ -280,6 +369,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       sidebarPin: {},
       hiddenSidebarSections: [],
       presetGraveyards: {},
+      canvasPresets: {},
 
       setHeaderActivePanel: (id) => set({ headerActivePanelId: id }),
       setBodyActivePanel: (id) => set(state => {
@@ -560,6 +650,10 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             specPanels.forEach(sp => {
               if (!updatedPanels[sp.id]) updatedPanels[sp.id] = sp
               else {
+                // Preserve lazyLoad:false — panel was already loaded by the user. Only
+                // reset to sleep if the panel hasn't been woken yet. This lets closing
+                // and reopening the app keep loaded panels in their loaded state.
+                const wasLoaded = (updatedPanels[sp.id].settings as Record<string, unknown> | undefined)?.lazyLoad === false
                 updatedPanels[sp.id] = {
                   ...updatedPanels[sp.id],
                   settings: {
@@ -568,7 +662,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
                       browserTabs: sp.settings?.browserTabs,
                       browserActiveTabId: sp.settings?.browserActiveTabId
                     } : {}),
-                    lazyLoad: sp.settings?.lazyLoad === true
+                    lazyLoad: wasLoaded ? false : (sp.settings?.lazyLoad === true)
                   }
                 }
               }
@@ -730,6 +824,47 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           window.addEventListener('storage', onStorage)
           w.__wts_storage_bound = true
         }
+
+        // On every launch: put all browser panels back to sleep. Webviews are
+        // expensive and the user deliberately chooses when to wake each one.
+        // Only call set() if something actually needed sleeping — avoids a
+        // spurious state overwrite that could interfere with persistence.
+        if (!w.__wts_sleep_reset) {
+          w.__wts_sleep_reset = true
+          const cur = get()
+          const putToSleep = (panels: Record<string, Panel>) => {
+            let changed = false
+            const next = { ...panels }
+            Object.values(next).forEach(p => {
+              if (p.type === 'browser' && (p.settings as Record<string, unknown> | undefined)?.lazyLoad === false) {
+                next[p.id] = { ...p, settings: { ...(p.settings || {}), lazyLoad: true } }
+                changed = true
+              }
+            })
+            return changed ? next : panels
+          }
+          let anySleepChanged = false
+          const tabs = cur.tabs.map(tab => {
+            const panels = putToSleep(tab.panels)
+            if (panels !== tab.panels) { anySleepChanged = true; return { ...tab, panels } }
+            return tab
+          })
+          if (anySleepChanged) {
+            const activeTab = tabs.find(t => t.id === cur.activeTabId)
+            set({ tabs, panels: activeTab ? activeTab.panels : cur.panels })
+          }
+        }
+
+        // Expose dirty-check for main process close handler.
+        w.__deck_isDirty = () => {
+          const s = get()
+          return s.tabs.some(t =>
+            t.kind !== 'preset:life' && t.kind !== 'preset:no-life' &&
+            Object.keys(t.panels).length > 0 &&
+            t.lastEditedAt && t.lastEditedAt > (t.lastSavedAt || 0)
+          )
+        }
+
         console.log('Workspace initialized')
       },
 
@@ -1046,6 +1181,68 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         tabs: state.tabs.map(tab => tab.id === state.activeTabId ? { ...tab, lastSavedAt: Date.now() } : tab)
       })),
 
+      saveCanvasPreset: (name) => {
+        const state = get()
+        const id = `cpreset-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+        const preset: CanvasPreset = {
+          id,
+          name: name.trim() || 'Untitled',
+          savedAt: Date.now(),
+          panels: state.panels,
+          viewport: state.viewport
+        }
+        set(s => ({
+          canvasPresets: { ...s.canvasPresets, [id]: preset },
+          tabs: s.tabs.map(t => t.id === s.activeTabId ? { ...t, linkedPresetId: id } : t)
+        }))
+        return id
+      },
+
+      overwriteCanvasPreset: (id) => {
+        const state = get()
+        const preset = state.canvasPresets[id]
+        if (!preset) return
+        const updated: CanvasPreset = { ...preset, savedAt: Date.now(), panels: state.panels, viewport: state.viewport }
+        set(s => ({ canvasPresets: { ...s.canvasPresets, [id]: updated } }))
+      },
+
+      loadCanvasPreset: (id) => {
+        const state = get()
+        const preset = state.canvasPresets[id]
+        if (!preset) return
+        // Clone panels and put browser panels to sleep.
+        const panels: Record<string, Panel> = {}
+        Object.values(preset.panels).forEach(p => {
+          panels[p.id] = p.type === 'browser'
+            ? { ...p, settings: { ...(p.settings || {}), lazyLoad: true } }
+            : { ...p }
+        })
+        const tab: WorkspaceTab = {
+          id: `tab-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          title: preset.name,
+          panels,
+          viewport: preset.viewport,
+          selectedPanelIds: [],
+          createdAt: Date.now(),
+          linkedPresetId: id
+        }
+        set(s => ({
+          tabs: [...s.tabs, tab],
+          activeTabId: tab.id,
+          panels: tab.panels,
+          selectedPanelIds: [],
+          viewport: tab.viewport,
+          past: [],
+          future: []
+        }))
+      },
+
+      deleteCanvasPreset: (id) => set(state => {
+        const next = { ...state.canvasPresets }
+        delete next[id]
+        return { canvasPresets: next }
+      }),
+
       movePanelToTab: (panelId, toTabId) => set(state => {
         if (toTabId === state.activeTabId) return state
         const panel = state.panels[panelId]
@@ -1143,7 +1340,8 @@ export const useWorkspaceStore = create<WorkspaceState>()(
     }),
     {
       name: 'worktree-studio-workspace',
-      version: 3,
+      storage: createJSONStorage(() => dualStorage),
+      version: 4,
       partialize: (state) => ({
         panels: state.panels,
         viewport: state.viewport,
@@ -1161,14 +1359,14 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         sidebarPin: state.sidebarPin,
         hiddenSidebarSections: state.hiddenSidebarSections,
         prefs: state.prefs,
-        presetGraveyards: state.presetGraveyards
+        presetGraveyards: state.presetGraveyards,
+        canvasPresets: state.canvasPresets
       }),
-      // v2: scrub retired gold/amber colors. v3: force snapToGrid off — was the source
-      // of the end-of-drag jerk. Users who actually want it can toggle the Snap chip.
+      // v2: scrub retired gold/amber colors. v3: force snapToGrid off. v4: add canvasPresets.
       migrate: (persisted: unknown) => {
         const RETIRED = new Set(['#d4a017', '#ffd36a', '#ffc517', '#ffbd2e'])
         const scrub = (c?: string) => (c && RETIRED.has(c.toLowerCase()) ? '' : c)
-        const data = persisted as { panels?: Record<string, Panel>; tabs?: WorkspaceTab[]; snapToGrid?: boolean }
+        const data = persisted as { panels?: Record<string, Panel>; tabs?: WorkspaceTab[]; snapToGrid?: boolean; canvasPresets?: Record<string, CanvasPreset> }
         if (data?.panels) {
           Object.values(data.panels).forEach(p => { if (p.color) p.color = scrub(p.color) })
         }
@@ -1179,6 +1377,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           })
         }
         if (data) data.snapToGrid = false
+        if (data && !data.canvasPresets) data.canvasPresets = {}
         return data as WorkspaceState
       }
     }

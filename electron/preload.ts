@@ -103,6 +103,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
       return () => ipcRenderer.removeListener('popout:flush', l)
     }
   },
+  appClose: {
+    onSaveThenClose: (cb: () => void) => {
+      const l = () => cb()
+      ipcRenderer.on('app:save-then-close', l)
+      return () => ipcRenderer.removeListener('app:save-then-close', l)
+    },
+    forceClose: () => ipcRenderer.invoke('app:force-close')
+  },
   codeServer: {
     start: () => ipcRenderer.invoke('codeserver:start'),
     status: () => ipcRenderer.invoke('codeserver:status'),
@@ -187,6 +195,10 @@ declare global {
         onPanelDetached: (cb: (panelId: string) => void) => () => void
         onPanelRedocked: (cb: (panelId: string) => void) => () => void
         onPopoutFlush: (cb: () => void) => () => void
+      }
+      appClose: {
+        onSaveThenClose: (cb: () => void) => () => void
+        forceClose: () => Promise<void>
       }
       codeServer: {
         start: () => Promise<{ ok: boolean; port?: number; url?: string; error?: string }>

@@ -50,6 +50,22 @@ function MainAppShell() {
 
   useEffect(() => { initialize() }, [initialize])
 
+  // Handle main-process "Save & Close" request: auto-save then force-close.
+  useEffect(() => {
+    const unsub = window.electronAPI?.appClose?.onSaveThenClose(() => {
+      const s = useWorkspaceStore.getState()
+      const activeTab = s.tabs.find(t => t.id === s.activeTabId)
+      if (activeTab?.linkedPresetId && s.canvasPresets[activeTab.linkedPresetId]) {
+        s.overwriteCanvasPreset(activeTab.linkedPresetId)
+      } else if (activeTab && Object.keys(activeTab.panels).length > 0) {
+        s.saveCanvasPreset(activeTab.title || 'Canvas')
+      }
+      s.markTabSaved()
+      window.electronAPI?.appClose?.forceClose()
+    })
+    return () => unsub?.()
+  }, [])
+
   useEffect(() => {
     // 'system' = follow OS preference. Watch the media query and remap to
     // dark/light dynamically so user can switch OS theme and we follow.
@@ -370,6 +386,22 @@ function MainAppShell() {
       if ((e.ctrlKey || e.metaKey) && e.altKey && !e.shiftKey && e.key.toLowerCase() === 's') {
         e.preventDefault()
         useWorkspaceStore.getState().markTabSaved()
+        return
+      }
+
+      // Ctrl+S on canvas (not inside panel body) → smart save canvas as preset.
+      if (!isInsidePanelBody && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 's') {
+        e.preventDefault()
+        const s = useWorkspaceStore.getState()
+        const activeTab = s.tabs.find(t => t.id === s.activeTabId)
+        if (activeTab?.linkedPresetId && s.canvasPresets[activeTab.linkedPresetId]) {
+          s.overwriteCanvasPreset(activeTab.linkedPresetId)
+          s.markTabSaved()
+        } else {
+          // No linked preset — open the presets menu by dispatching a custom event
+          // that StatusBar listens for.
+          window.dispatchEvent(new CustomEvent('deck:open-presets-menu'))
+        }
         return
       }
 

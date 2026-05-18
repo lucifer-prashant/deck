@@ -13,7 +13,7 @@ interface Props {
 
 const TabContextMenu: React.FC<Props> = ({ tabId, x, y, onRename, onClose }) => {
   const menuRef = useRef<HTMLDivElement>(null)
-  const { tabs, createTab, closeTab, switchTab, markTabSaved } = useWorkspaceStore()
+  const { tabs, createTab, closeTab, switchTab, markTabSaved, overwriteCanvasPreset, saveCanvasPreset, canvasPresets } = useWorkspaceStore()
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -75,15 +75,51 @@ const TabContextMenu: React.FC<Props> = ({ tabId, x, y, onRename, onClose }) => 
   const closeWithConfirm = () => {
     const count = Object.keys(tab.panels).length
     if (count > 0) {
-      const ok = window.confirm(
-        `Close canvas "${tab.title}"?\n\n${count} panel${count === 1 ? '' : 's'} will be removed.`
-      )
+      const isBuiltinPreset = tab.kind === 'preset:life' || tab.kind === 'preset:no-life'
+      const dirty = !isBuiltinPreset && tab.lastEditedAt && tab.lastEditedAt > (tab.lastSavedAt || 0)
+      if (dirty) {
+        const linked = tab.linkedPresetId ? canvasPresets[tab.linkedPresetId] : null
+        const wantSave = window.confirm(
+          linked
+            ? `Save changes to "${linked.name}" before closing? OK = save, Cancel = close without saving.`
+            : `Save canvas "${tab.title}" as a preset before closing? OK = save, Cancel = close without saving.`
+        )
+        if (wantSave) {
+          if (linked) {
+            overwriteCanvasPreset(linked.id)
+            markTabSaved()
+          } else {
+            const name = window.prompt('Preset name:', tab.title)
+            if (name?.trim()) {
+              saveCanvasPreset(name.trim())
+              markTabSaved()
+            }
+          }
+        }
+        closeTab(tabId)
+        return
+      }
+      const ok = window.confirm(`Close canvas "${tab.title}"?\n\n${count} panel${count === 1 ? '' : 's'} will be removed.`)
       if (!ok) return
     }
     closeTab(tabId)
   }
 
   const wrap = (fn: () => void) => () => { fn(); onClose() }
+
+  const saveCanvas = () => {
+    if (!tab) return
+    if (tab.linkedPresetId && canvasPresets[tab.linkedPresetId]) {
+      overwriteCanvasPreset(tab.linkedPresetId)
+      markTabSaved()
+    } else {
+      const name = window.prompt('Save canvas as preset:', tab.title)
+      if (name?.trim()) {
+        saveCanvasPreset(name.trim())
+        markTabSaved()
+      }
+    }
+  }
 
   const left = Math.max(6, Math.min(x, window.innerWidth - 246))
   const top = Math.max(6, Math.min(y, window.innerHeight - 286))
@@ -100,8 +136,11 @@ const TabContextMenu: React.FC<Props> = ({ tabId, x, y, onRename, onClose }) => 
         <span>New canvas</span>
       </button>
       <div className="ctx-sep" />
-      <button className="ctx-item" onClick={wrap(markTabSaved)}>
-        <span>Mark as saved</span>
+      <button className="ctx-item" onClick={wrap(saveCanvas)}>
+        <span>Save</span>
+        {tab?.linkedPresetId && canvasPresets[tab.linkedPresetId] && (
+          <span className="ctx-kbd">{canvasPresets[tab.linkedPresetId].name}</span>
+        )}
       </button>
       <div className="ctx-sep" />
       <button

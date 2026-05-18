@@ -234,6 +234,26 @@ export const executeWorkspaceCommand = (command: WorkspaceCommand) => {
     case 'clear-canvas': {
       const count = Object.keys(store.panels).length
       if (count === 0) break
+      // Offer save before clearing.
+      const activeTab = store.tabs.find(t => t.id === store.activeTabId)
+      const linkedPreset = activeTab?.linkedPresetId ? store.canvasPresets[activeTab.linkedPresetId] : null
+      const wantSave = window.confirm(
+        linkedPreset
+          ? `Save changes to preset "${linkedPreset.name}" before clearing?`
+          : `Save canvas as a preset before clearing?`
+      )
+      if (wantSave) {
+        if (linkedPreset) {
+          store.overwriteCanvasPreset(linkedPreset.id)
+          store.markTabSaved()
+        } else {
+          const name = window.prompt('Preset name:', activeTab?.title || 'Canvas')
+          if (name?.trim()) {
+            store.saveCanvasPreset(name.trim())
+            store.markTabSaved()
+          }
+        }
+      }
       const ok = window.confirm(
         `Clear canvas?\n\n${count} panel${count === 1 ? '' : 's'} will be deleted from this tab. This cannot be undone after the tab switches.`
       )

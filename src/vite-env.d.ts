@@ -72,6 +72,10 @@ interface Window {
       onPanelRedocked: (cb: (panelId: string) => void) => () => void
       onPopoutFlush: (cb: () => void) => () => void
     }
+    appClose?: {
+      onSaveThenClose: (cb: () => void) => () => void
+      forceClose: () => Promise<void>
+    }
     codeServer?: {
       start: () => Promise<{ ok: boolean; port?: number; url?: string; error?: string }>
       status: () => Promise<{ ok: boolean; running?: boolean; port?: number; url?: string; available?: boolean }>

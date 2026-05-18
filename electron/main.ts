@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, ipcMain, dialog, shell } from 'electron'
+import { app, BrowserWindow, Menu, ipcMain, dialog, shell, session } from 'electron'
 import { join, basename, dirname } from 'path'
 import { homedir } from 'os'
 import { promises as fsp, existsSync } from 'fs'
@@ -166,6 +166,47 @@ function createWindow() {
     mainWindow?.show()
   })
 
+  // Intercept native close button. Ask renderer if dirty, show native dialog.
+  let forceClose = false
+  mainWindow.on('close', async (e) => {
+    if (forceClose) return  // already confirmed — let it through
+    e.preventDefault()
+    const win = mainWindow
+    if (!win) return
+
+    let isDirty = false
+    try {
+      isDirty = await win.webContents.executeJavaScript(
+        'typeof window.__deck_isDirty === "function" ? window.__deck_isDirty() : false'
+      )
+    } catch { isDirty = false }
+
+    if (!isDirty) {
+      forceClose = true
+      win.close()
+      return
+    }
+
+    const { response } = await dialog.showMessageBox(win, {
+      type: 'question',
+      buttons: ['Save & Close', "Close Anyway", 'Cancel'],
+      defaultId: 0,
+      cancelId: 2,
+      title: 'Unsaved Changes',
+      message: 'You have unsaved changes.',
+      detail: 'Save your canvas as a preset before closing?'
+    })
+
+    if (response === 0) {
+      // Save — renderer saves then sends 'app:force-close' when done
+      win.webContents.send('app:save-then-close')
+    } else if (response === 1) {
+      forceClose = true
+      win.close()
+    }
+    // response === 2 (Cancel): do nothing, window stays open
+  })
+
   mainWindow.on('closed', () => {
     mainWindow = null
   })
@@ -247,7 +288,16 @@ app.on('web-contents-created', (_evt, contents) => {
   })
 })
 
-app.whenReady().then(createWindow)
+app.whenReady().then(async () => {
+  // Clear stale service workers for the code-server partition on every launch.
+  // The Service Worker DB gets a stale LOCK file when the app exits ungracefully,
+  // causing "Failed to delete the database: Database IO error" on next start and a
+  // blank editor webview. Clearing service workers forces a fresh registration.
+  try {
+    await session.fromPartition('persist:wts-code-server').clearStorageData({ storages: ['serviceworkers'] })
+  } catch { /* non-fatal */ }
+  createWindow()
+})
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
@@ -352,6 +402,10 @@ ipcMain.handle('pty:cwd', async (_e, panelId: string) => {
   } catch (err) {
     return { ok: false, error: (err as Error).message }
   }
+})
+
+ipcMain.handle('app:force-close', () => {
+  mainWindow?.destroy()
 })
 
 app.on('before-quit', () => {

@@ -28,7 +28,11 @@ const WorkspaceChrome: React.FC = () => {
     setBarsVisible,
     toggleHelp,
     toggleCommandPalette,
-    toggleChrome
+    toggleChrome,
+    canvasPresets,
+    overwriteCanvasPreset,
+    saveCanvasPreset,
+    markTabSaved
   } = useWorkspaceStore()
 
   const [themeMenu, setThemeMenu] = useState<{ x: number; y: number } | null>(null)
@@ -90,13 +94,38 @@ const WorkspaceChrome: React.FC = () => {
     if (!t) return
     const count = Object.keys(t.panels).length
     if (count > 0) {
-      const ok = window.confirm(
-        `Close canvas "${t.title}"?\n\n${count} panel${count === 1 ? '' : 's'} will be removed.`
-      )
+      const isBuiltinPreset = t.kind === 'preset:life' || t.kind === 'preset:no-life'
+      const dirty = !isBuiltinPreset && t.lastEditedAt && t.lastEditedAt > (t.lastSavedAt || 0)
+      if (dirty) {
+        // Single prompt: OK = save then close, Cancel = close without saving.
+        const linked = t.linkedPresetId ? canvasPresets[t.linkedPresetId] : null
+        const wantSave = window.confirm(
+          linked
+            ? `Save changes to "${linked.name}" before closing? OK = save, Cancel = close without saving.`
+            : `Save canvas "${t.title}" as a preset before closing? OK = save, Cancel = close without saving.`
+        )
+        if (wantSave) {
+          if (linked) {
+            overwriteCanvasPreset(linked.id)
+            markTabSaved()
+          } else {
+            const name = window.prompt('Preset name:', t.title)
+            if (name?.trim()) {
+              saveCanvasPreset(name.trim())
+              markTabSaved()
+            }
+          }
+        }
+        // Close either way — user made their choice.
+        closeTab(id)
+        return
+      }
+      // Clean canvas: just confirm close.
+      const ok = window.confirm(`Close canvas "${t.title}"?\n\n${count} panel${count === 1 ? '' : 's'} will be removed.`)
       if (!ok) return
     }
     closeTab(id)
-  }, [tabs, closeTab])
+  }, [tabs, closeTab, canvasPresets, overwriteCanvasPreset, saveCanvasPreset, markTabSaved])
 
   const handleExport = () => {
     const json = exportWorkspace()
