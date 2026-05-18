@@ -13,7 +13,7 @@ interface Props {
 
 const TabContextMenu: React.FC<Props> = ({ tabId, x, y, onRename, onClose }) => {
   const menuRef = useRef<HTMLDivElement>(null)
-  const { tabs, createTab, closeTab, switchTab, markTabSaved, overwriteCanvasPreset, saveCanvasPreset, canvasPresets } = useWorkspaceStore()
+  const { tabs, createTab, closeTab, switchTab, markTabSaved, overwriteCanvasPreset, saveCanvasPreset, saveBuiltinPreset, canvasPresets } = useWorkspaceStore()
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -75,17 +75,21 @@ const TabContextMenu: React.FC<Props> = ({ tabId, x, y, onRename, onClose }) => 
   const closeWithConfirm = () => {
     const count = Object.keys(tab.panels).length
     if (count > 0) {
-      const isBuiltinPreset = tab.kind === 'preset:life' || tab.kind === 'preset:no-life'
-      const dirty = !isBuiltinPreset && tab.lastEditedAt && tab.lastEditedAt > (tab.lastSavedAt || 0)
+      const dirty = tab.lastEditedAt && tab.lastEditedAt > (tab.lastSavedAt || 0)
       if (dirty) {
+        const isBuiltin = tab.kind === 'preset:life' || tab.kind === 'preset:no-life'
         const linked = tab.linkedPresetId ? canvasPresets[tab.linkedPresetId] : null
         const wantSave = window.confirm(
-          linked
-            ? `Save changes to "${linked.name}" before closing? OK = save, Cancel = close without saving.`
-            : `Save canvas "${tab.title}" as a preset before closing? OK = save, Cancel = close without saving.`
+          isBuiltin
+            ? `Save layout changes to "${tab.title}" preset before closing? OK = save, Cancel = close without saving.`
+            : linked
+              ? `Save changes to "${linked.name}" before closing? OK = save, Cancel = close without saving.`
+              : `Save canvas "${tab.title}" as a preset before closing? OK = save, Cancel = close without saving.`
         )
         if (wantSave) {
-          if (linked) {
+          if (isBuiltin) {
+            saveBuiltinPreset(tab.kind as 'preset:life' | 'preset:no-life')
+          } else if (linked) {
             overwriteCanvasPreset(linked.id)
             markTabSaved()
           } else {
@@ -109,7 +113,9 @@ const TabContextMenu: React.FC<Props> = ({ tabId, x, y, onRename, onClose }) => 
 
   const saveCanvas = () => {
     if (!tab) return
-    if (tab.linkedPresetId && canvasPresets[tab.linkedPresetId]) {
+    if (tab.kind === 'preset:life' || tab.kind === 'preset:no-life') {
+      saveBuiltinPreset(tab.kind)
+    } else if (tab.linkedPresetId && canvasPresets[tab.linkedPresetId]) {
       overwriteCanvasPreset(tab.linkedPresetId)
       markTabSaved()
     } else {

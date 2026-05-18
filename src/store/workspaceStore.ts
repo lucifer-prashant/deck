@@ -302,6 +302,7 @@ export interface WorkspaceState {
   exportWorkspace: () => string
   importWorkspace: (json: string) => boolean
   markTabSaved: () => void
+  saveBuiltinPreset: (kind: 'preset:life' | 'preset:no-life') => void
   saveCanvasPreset: (name: string) => string
   overwriteCanvasPreset: (id: string) => void
   loadCanvasPreset: (id: string) => void
@@ -645,9 +646,12 @@ export const useWorkspaceStore = create<WorkspaceState>()(
               workingPanels = migrated
             }
 
-            // Resurrect any spec panel still missing.
+            // Resurrect any spec panel still missing — but NOT if the user explicitly
+            // saved without it (graveyard has preset entries but not this panel = deleted).
+            const graveyardHasExplicitSave = Object.keys(graveyard).some(k => k.startsWith(`preset-${name}-`))
             const updatedPanels = { ...workingPanels }
             specPanels.forEach(sp => {
+              if (graveyardHasExplicitSave && !graveyard[sp.id]) return  // deleted, skip
               if (!updatedPanels[sp.id]) updatedPanels[sp.id] = sp
               else {
                 // Preserve lazyLoad:false — panel was already loaded by the user. Only
@@ -667,13 +671,21 @@ export const useWorkspaceStore = create<WorkspaceState>()(
                 }
               }
             })
-            // Clear graveyard entries for the resurrected ones so future deletes write
-            // fresh snapshots.
+            // Sync graveyard to the actual panel state after merge. Clearing was the
+            // original intent but it wipes saveBuiltinPreset data on every button click.
+            // Writing current positions instead keeps saved layouts alive.
             const newGraveyard = { ...graveyard }
-            specPanels.forEach(sp => { if (newGraveyard[sp.id]) delete newGraveyard[sp.id] })
+            Object.values(updatedPanels).forEach(p => {
+              if (p.id.startsWith('preset-')) {
+                newGraveyard[p.id] = {
+                  x: p.x, y: p.y, width: p.width, height: p.height,
+                  title: p.title, color: p.color, settings: p.settings, description: p.description
+                }
+              }
+            })
 
             const updatedTabs = cur.tabs.map(t =>
-              t.id === existing.id ? { ...t, panels: updatedPanels, kind } : t
+              t.id === existing.id ? { ...t, panels: updatedPanels, kind, lastEditedAt: undefined } : t
             )
             const isActive = cur.activeTabId === existing.id
             set({
@@ -690,9 +702,21 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           }
 
           // Fresh tab — build from spec + graveyard overrides.
+          // If the user has ever explicitly saved this preset (graveyard has preset-* entries),
+          // only include spec panels that are still in the graveyard. Panels the user deleted
+          // then saved will be absent from the graveyard and must stay gone.
+          const graveyardHasExplicitSave = Object.keys(graveyard).some(k => k.startsWith(`preset-${name}-`))
           const panelMap: Record<string, Panel> = {}
-          specPanels.forEach(p => { panelMap[p.id] = p })
-          // Mark this id so even renames don't break the kind link.
+          specPanels.forEach(p => {
+            if (graveyardHasExplicitSave && !graveyard[p.id]) return  // deleted, skip
+            panelMap[p.id] = p
+          })
+          // Restore custom (user-added) panels from graveyard — notes, browsers, etc.
+          Object.entries(graveyard).forEach(([id, data]) => {
+            if (!id.startsWith('preset-') && !panelMap[id]) {
+              panelMap[id] = data as Panel
+            }
+          })
           void presetPanelId
           const tab: WorkspaceTab = {
             id: `tab-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -762,26 +786,15 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       closeTab: (id) =>
         set((state) => {
           if (state.tabs.length <= 1) return state
-          const closingTab = state.tabs.find(t => t.id === id)
           const tabs = state.tabs.filter(tab => tab.id !== id)
           const activeTab = id === state.activeTabId ? tabs[0] : tabs.find(tab => tab.id === state.activeTabId) || tabs[0]
 
           // Closing a preset tab: snapshot ALL of its panels to the graveyard so
           // re-loading the preset can resurrect them at their last-known state.
           let presetGraveyards = state.presetGraveyards
-          if (closingTab?.kind?.startsWith('preset:')) {
-            const presetName = closingTab.kind.slice('preset:'.length)
-            const grave = { ...(presetGraveyards[presetName] || {}) }
-            Object.values(closingTab.panels).forEach(p => {
-              if (p.id.startsWith('preset-')) {
-                grave[p.id] = {
-                  x: p.x, y: p.y, width: p.width, height: p.height,
-                  title: p.title, color: p.color, settings: p.settings, description: p.description
-                }
-              }
-            })
-            presetGraveyards = { ...presetGraveyards, [presetName]: grave }
-          }
+          // Intentionally NOT writing graveyard on tab close — graveyard only updates
+          // on explicit Ctrl+S (saveBuiltinPreset) or panel delete. Closing without
+          // saving should revert to last explicitly saved state.
 
           // Clear any focus refs pointing at panels we just dropped.
           const stillExists = (pid: string | null) => !!(pid && activeTab.panels[pid])
@@ -859,7 +872,6 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         w.__deck_isDirty = () => {
           const s = get()
           return s.tabs.some(t =>
-            t.kind !== 'preset:life' && t.kind !== 'preset:no-life' &&
             Object.keys(t.panels).length > 0 &&
             t.lastEditedAt && t.lastEditedAt > (t.lastSavedAt || 0)
           )
@@ -1180,6 +1192,22 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       markTabSaved: () => set(state => ({
         tabs: state.tabs.map(tab => tab.id === state.activeTabId ? { ...tab, lastSavedAt: Date.now() } : tab)
       })),
+
+      saveBuiltinPreset: (kind) => {
+        const state = get()
+        const presetName = kind.slice('preset:'.length) as 'life' | 'no-life'
+        const tab = state.tabs.find(t => t.kind === kind)
+        if (!tab) return
+        const grave: Record<string, Partial<Panel>> = { ...(state.presetGraveyards[presetName] || {}) }
+        // Clear every panel not in the current tab — covers deleted spec panels AND deleted
+        // custom panels (notes, editors). Graveyard after save = exact current tab state.
+        Object.keys(grave).forEach(id => { if (!tab.panels[id]) delete grave[id] })
+        Object.values(tab.panels).forEach(p => { grave[p.id] = { ...p } })
+        set(s => ({
+          presetGraveyards: { ...s.presetGraveyards, [presetName]: grave },
+          tabs: s.tabs.map(t => t.id === tab.id ? { ...t, lastSavedAt: Date.now() } : t)
+        }))
+      },
 
       saveCanvasPreset: (name) => {
         const state = get()

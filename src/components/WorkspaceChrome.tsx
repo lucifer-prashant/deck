@@ -32,6 +32,7 @@ const WorkspaceChrome: React.FC = () => {
     canvasPresets,
     overwriteCanvasPreset,
     saveCanvasPreset,
+    saveBuiltinPreset,
     markTabSaved
   } = useWorkspaceStore()
 
@@ -94,18 +95,21 @@ const WorkspaceChrome: React.FC = () => {
     if (!t) return
     const count = Object.keys(t.panels).length
     if (count > 0) {
-      const isBuiltinPreset = t.kind === 'preset:life' || t.kind === 'preset:no-life'
-      const dirty = !isBuiltinPreset && t.lastEditedAt && t.lastEditedAt > (t.lastSavedAt || 0)
+      const dirty = t.lastEditedAt && t.lastEditedAt > (t.lastSavedAt || 0)
       if (dirty) {
-        // Single prompt: OK = save then close, Cancel = close without saving.
+        const isBuiltin = t.kind === 'preset:life' || t.kind === 'preset:no-life'
         const linked = t.linkedPresetId ? canvasPresets[t.linkedPresetId] : null
         const wantSave = window.confirm(
-          linked
-            ? `Save changes to "${linked.name}" before closing? OK = save, Cancel = close without saving.`
-            : `Save canvas "${t.title}" as a preset before closing? OK = save, Cancel = close without saving.`
+          isBuiltin
+            ? `Save layout changes to "${t.title}" preset before closing? OK = save, Cancel = close without saving.`
+            : linked
+              ? `Save changes to "${linked.name}" before closing? OK = save, Cancel = close without saving.`
+              : `Save canvas "${t.title}" as a preset before closing? OK = save, Cancel = close without saving.`
         )
         if (wantSave) {
-          if (linked) {
+          if (isBuiltin) {
+            saveBuiltinPreset(t.kind as 'preset:life' | 'preset:no-life')
+          } else if (linked) {
             overwriteCanvasPreset(linked.id)
             markTabSaved()
           } else {

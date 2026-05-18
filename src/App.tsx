@@ -54,12 +54,18 @@ function MainAppShell() {
   useEffect(() => {
     const unsub = window.electronAPI?.appClose?.onSaveThenClose(() => {
       const s = useWorkspaceStore.getState()
-      const activeTab = s.tabs.find(t => t.id === s.activeTabId)
-      if (activeTab?.linkedPresetId && s.canvasPresets[activeTab.linkedPresetId]) {
-        s.overwriteCanvasPreset(activeTab.linkedPresetId)
-      } else if (activeTab && Object.keys(activeTab.panels).length > 0) {
-        s.saveCanvasPreset(activeTab.title || 'Canvas')
-      }
+      // Save all dirty tabs.
+      s.tabs.forEach(t => {
+        if (!t.lastEditedAt || t.lastEditedAt <= (t.lastSavedAt || 0)) return
+        if (Object.keys(t.panels).length === 0) return
+        if (t.kind === 'preset:life' || t.kind === 'preset:no-life') {
+          s.saveBuiltinPreset(t.kind)
+        } else if (t.linkedPresetId && s.canvasPresets[t.linkedPresetId]) {
+          s.overwriteCanvasPreset(t.linkedPresetId)
+        } else {
+          s.saveCanvasPreset(t.title || 'Canvas')
+        }
+      })
       s.markTabSaved()
       window.electronAPI?.appClose?.forceClose()
     })
@@ -394,12 +400,12 @@ function MainAppShell() {
         e.preventDefault()
         const s = useWorkspaceStore.getState()
         const activeTab = s.tabs.find(t => t.id === s.activeTabId)
-        if (activeTab?.linkedPresetId && s.canvasPresets[activeTab.linkedPresetId]) {
+        if (activeTab?.kind === 'preset:life' || activeTab?.kind === 'preset:no-life') {
+          s.saveBuiltinPreset(activeTab.kind)
+        } else if (activeTab?.linkedPresetId && s.canvasPresets[activeTab.linkedPresetId]) {
           s.overwriteCanvasPreset(activeTab.linkedPresetId)
           s.markTabSaved()
         } else {
-          // No linked preset — open the presets menu by dispatching a custom event
-          // that StatusBar listens for.
           window.dispatchEvent(new CustomEvent('deck:open-presets-menu'))
         }
         return
