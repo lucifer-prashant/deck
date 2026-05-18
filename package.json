@@ -1,7 +1,7 @@
 {
-  "name": "worktree-studio",
+  "name": "deck",
   "version": "0.1.0",
-  "description": "A Fedora-first spatial development workspace for managing terminals, editors, previews, notes, and Git worktrees on one persistent canvas.",
+  "description": "Spatial workspace for code — infinite canvas with terminals, editors, browsers, notes, git, and docking.",
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
@@ -25,10 +25,10 @@
     "fedora"
   ],
   "author": {
-    "name": "Worktree Studio Team",
-    "email": "team@worktreestudio.com"
+    "name": "lucifer-prashant",
+    "email": "22051530@kiit.ac.in"
   },
-  "homepage": "https://github.com/unknown/worktree-studio",
+  "homepage": "https://github.com/lucifer-prashant/deck",
   "license": "MIT",
   "devDependencies": {
     "@types/react": "^18.2.55",
@@ -61,8 +61,8 @@
     "zustand": "^4.4.7"
   },
   "build": {
-    "appId": "com.worktreestudio.app",
-    "productName": "Worktree Studio",
+    "appId": "com.lucifer-prashant.deck",
+    "productName": "Deck",
     "directories": {
       "output": "release"
     },
@@ -73,10 +73,11 @@
     "linux": {
       "target": [
         "AppImage",
-        "rpm"
+        "rpm",
+        "deb"
       ],
       "category": "Development",
-      "maintainer": "Worktree Studio <team@worktreestudio.com>"
+      "maintainer": "lucifer-prashant <22051530@kiit.ac.in>"
     }
   }
 }
