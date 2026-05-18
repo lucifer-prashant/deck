@@ -1,0 +1,1002 @@
+import React, { useRef, useState, useCallback, useEffect } from 'react'
+import { flushSync } from 'react-dom'
+import { Panel as PanelType } from '../store/workspaceStore'
+import { useWorkspaceStore } from '../store/workspaceStore'
+import { confirmPanelsDeletion } from '../panelDeletion'
+import PanelContextMenu from './PanelContextMenu'
+import BrowserPanel from './BrowserPanel'
+import TerminalPanel from './TerminalPanel'
+import EditorPanel from './EditorPanel'
+import './Panel.css'
+
+interface PanelProps {
+  panel: PanelType
+  isSelected: boolean
+  offscreen?: boolean
+  embedded?: boolean  // rendered inside another panel's stack body — skip chrome + positioning
+  onSelect: (id: string, additive: boolean) => void
+  onMove: (id: string, x: number, y: number) => void
+  onResize: (id: string, width: number, height: number) => void
+}
+
+type ResizeDir = 'se' | 'sw' | 'ne' | 'nw' | 'n' | 's' | 'e' | 'w'
+
+const TYPE_ICON: Record<PanelType['type'], string> = {
+  terminal: '▶',
+  editor: '✎',
+  browser: '◐',
+  note: '✦',
+  region: '▢'
+}
+
+const SNAP_PX = 6 // screen-space alignment-guide threshold
+
+// Retired gold accents — any persisted panel.color matching these is ignored at render
+// time so old saves can't show a gold border even if migration hasn't run yet.
+const RETIRED_COLORS = new Set(['#d4a017', '#ffd36a', '#ffc517', '#ffbd2e'])
+const sanitizeColor = (c?: string): string | undefined => {
+  if (!c) return undefined
+  return RETIRED_COLORS.has(c.toLowerCase()) ? undefined : c
+}
+
+// Pick readable text color for a given background hex (#rrggbb).
+const readableOn = (hex: string): { fg: string; placeholder: string } => {
+  const m = hex.match(/^#?([0-9a-f]{6})$/i)
+  if (!m) return { fg: '#422006', placeholder: 'rgba(66,32,6,0.4)' }
+  const n = parseInt(m[1], 16)
+  const r = (n >> 16) & 0xff, g = (n >> 8) & 0xff, b = n & 0xff
+  // sRGB → relative luminance.
+  const lin = (c: number) => {
+    const s = c / 255
+    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4)
+  }
+  const L = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b)
+  if (L < 0.42) return { fg: '#fafaf5', placeholder: 'rgba(255,255,255,0.45)' }
+  return { fg: '#1a1107', placeholder: 'rgba(26,17,7,0.42)' }
+}
+
+const SleepPlaceholder: React.FC<{ panel: PanelType; onLoad: () => void }> = ({ panel, onLoad }) => {
+  const accent = sanitizeColor(panel.color) || '#4dabe8'
+  // Don't stop mousedown propagation — let Panel's handler run so dragging works
+  // straight from the placeholder. Only the click handler wakes the panel.
+  return (
+    <div
+      className="panel-content"
+      onClick={(e) => { e.stopPropagation(); onLoad() }}
+      role="button"
+      title={`Click to load ${panel.title}`}
+      style={{
+        width: '100%',
+        height: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 14,
+        background: `radial-gradient(120% 90% at 50% 30%, ${accent}22, transparent 65%), linear-gradient(180deg, #16181d, #0d0f12)`,
+        cursor: 'pointer',
+        userSelect: 'none',
+        overflow: 'hidden'
+      }}
+    >
+      <div style={{
+        width: 68,
+        height: 68,
+        borderRadius: 16,
+        background: `linear-gradient(135deg, ${accent}, ${accent}88)`,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        color: '#fff',
+        fontSize: 30,
+        fontWeight: 800,
+        boxShadow: `0 12px 32px ${accent}44, 0 0 0 1px ${accent}66 inset`
+      }}>{TYPE_ICON[panel.type]}</div>
+      <div style={{ textAlign: 'center' }}>
+        <div style={{ color: '#fff', fontWeight: 700, fontSize: 16, marginBottom: 4 }}>{panel.title}</div>
+        <div style={{ color: 'rgba(255,255,255,0.45)', fontSize: 11, fontFamily: 'JetBrains Mono, monospace' }}>{panel.type}</div>
+      </div>
+      <div style={{
+        marginTop: 4,
+        padding: '8px 18px',
+        borderRadius: 999,
+        background: `${accent}22`,
+        border: `1px solid ${accent}55`,
+        color: '#fff',
+        fontWeight: 700,
+        fontSize: 11,
+        letterSpacing: '0.08em',
+        textTransform: 'uppercase'
+      }}>click to load</div>
+    </div>
+  )
+}
+
+const Panel: React.FC<PanelProps> = ({ panel, isSelected, offscreen, embedded, onSelect, onMove, onResize }) => {
+  const panelRef = useRef<HTMLDivElement>(null)
+  const titleInputRef = useRef<HTMLInputElement>(null)
+  const [isDragging, setIsDragging] = useState(false)
+  const [isResizing, setIsResizing] = useState<ResizeDir | null>(null)
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 })
+  const dragStartCursor = useRef({ x: 0, y: 0 })
+  const [resizeStart, setResizeStart] = useState({ x: 0, y: 0, width: 0, height: 0, panelX: 0, panelY: 0 })
+  const [renaming, setRenaming] = useState(false)
+  const [draftTitle, setDraftTitle] = useState(panel.title)
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; targetPanel?: PanelType } | null>(null)
+  const initialPositions = useRef<Map<string, { x: number; y: number }>>(new Map())
+  const dragMoved = useRef(false)
+  // When user clicks (no shift) on a panel that's already part of a multi-selection,
+  // defer collapsing selection to single until mouseup — gives them a chance to drag
+  // the whole group from this panel first. If they only click (no drag), collapse.
+  const pendingCollapseToSingle = useRef(false)
+
+  // Heavy perf optimization: Panel previously subscribed to s.panels (whole object) which
+  // meant every Panel re-rendered on every mouse move during a drag of any other panel.
+  // Now we only subscribe to the small slices that actually affect this panel's render
+  // output. Everything cross-panel (snap math, max zIndex, selection batch) reads via
+  // getState() inside event handlers — fresh values without React re-renders.
+  const jumpModeActive = useWorkspaceStore(s => s.jumpMode.active)
+  const headerActiveId = useWorkspaceStore(s => s.headerActivePanelId)
+  const bodyActiveId = useWorkspaceStore(s => s.bodyActivePanelId)
+  // Actions are stable references, pull from getState() to avoid subscribing.
+  const deletePanel = useWorkspaceStore(s => s.deletePanel)
+  const updatePanel = useWorkspaceStore(s => s.updatePanel)
+  const pushHistory = useWorkspaceStore(s => s.pushHistory)
+  const setDragGuides = useWorkspaceStore(s => s.setDragGuides)
+  const stackDropTargetId = useWorkspaceStore(s => s.stackDropTargetId)
+  // Track which other panel's header is under the cursor during a drag — used
+  // for drag-onto-header → stack merge. Updated in applyMove; consumed in mouseup.
+  const stackHitRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    if (!renaming) setDraftTitle(panel.title)
+  }, [panel.title, renaming])
+
+  useEffect(() => {
+    if (renaming) {
+      requestAnimationFrame(() => {
+        titleInputRef.current?.focus()
+        titleInputRef.current?.select()
+      })
+    }
+  }, [renaming])
+
+  const beginRename = useCallback(() => {
+    if (panel.locked) return
+    setDraftTitle(panel.title)
+    setRenaming(true)
+  }, [panel.title, panel.locked])
+
+  // External rename request (e.g. F2 from canvas) → enter inline rename mode.
+  const renameRequestId = useWorkspaceStore(s => s.renameRequestId)
+  const requestRename = useWorkspaceStore(s => s.requestRename)
+  useEffect(() => {
+    if (renameRequestId === panel.id) {
+      beginRename()
+      requestRename(null)
+    }
+  }, [renameRequestId, panel.id, beginRename, requestRename])
+
+  const commitRename = useCallback(() => {
+    const next = draftTitle.trim()
+    if (next && next !== panel.title) updatePanel(panel.id, { title: next })
+    setRenaming(false)
+  }, [draftTitle, panel.id, panel.title, updatePanel])
+
+  const cancelRename = useCallback(() => {
+    setDraftTitle(panel.title)
+    setRenaming(false)
+  }, [panel.title])
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    if (renaming) return
+    if (e.button === 2) return
+    if (jumpModeActive) { e.stopPropagation(); return }
+    // Mousedown inside terminal xterm or note textarea must go to the embedded
+    // app (selection / cursor placement) — don't initiate a panel drag here.
+    // The header still drags normally because xterm/note don't live there.
+    const t = e.target as HTMLElement | null
+    const inEmbeddedBody = !!(
+      t?.closest?.('.terminal-xterm') ||
+      t?.closest?.('.note-content') ||
+      t?.closest?.('.xterm') ||
+      t?.tagName === 'WEBVIEW' ||
+      t?.closest?.('webview')
+    )
+    if (inEmbeddedBody) {
+      // Still stop bubbling so Canvas doesn't treat this as empty-canvas pan,
+      // and record selection + focus, but skip drag setup so xterm/textarea
+      // gets the raw mousedown for selection.
+      e.stopPropagation()
+      const sBefore2 = useWorkspaceStore.getState()
+      if (!sBefore2.selectedPanelIds.includes(panel.id)) onSelect(panel.id, false)
+      if (panel.type !== 'region') sBefore2.setLastFocusedPanel(panel.id)
+      return
+    }
+    e.stopPropagation()
+
+    const additive = e.shiftKey || e.ctrlKey || e.metaKey
+    const sBefore = useWorkspaceStore.getState()
+    const alreadyInMulti = sBefore.selectedPanelIds.length > 1 && sBefore.selectedPanelIds.includes(panel.id)
+
+    if (additive) {
+      onSelect(panel.id, true)
+    } else if (alreadyInMulti) {
+      // Keep multi-selection live so the upcoming move (if any) drags the whole group.
+      // Bump lastFocusedPanel so sidebar context still follows this click.
+      // Skip for regions — region click must not steal sidebar context.
+      if (panel.type !== 'region') sBefore.setLastFocusedPanel(panel.id)
+      pendingCollapseToSingle.current = true
+    } else {
+      onSelect(panel.id, false)
+    }
+
+    // Auto-raise (skip if pinned front or pinned back). Read panels via getState so we
+    // don't subscribe to the whole object.
+    if (panel.type !== 'region' && !panel.pinFront && !panel.pinBack) {
+      const allPanels = Object.values(useWorkspaceStore.getState().panels)
+      const maxZ = Math.max(1, ...allPanels.filter(p => !p.pinFront && !p.pinBack).map(p => p.zIndex || 1))
+      if ((panel.zIndex || 1) < maxZ) {
+        updatePanel(panel.id, { zIndex: maxZ + 1 }, { skipHistory: true })
+      }
+    }
+
+    if (!panelRef.current || panel.locked) return
+
+    const rect = panelRef.current.getBoundingClientRect()
+    setIsDragging(true)
+    dragMoved.current = false
+    setDragStart({ x: e.clientX - rect.left, y: e.clientY - rect.top })
+    dragStartCursor.current = { x: e.clientX, y: e.clientY }
+
+    const s = useWorkspaceStore.getState()
+    const baseSelected = s.selectedPanelIds.length > 0 ? s.selectedPanelIds : [panel.id]
+    // Expand any region in the drag set to include its children — region drag must
+    // carry its contents. Children get the same dx/dy via the existing multi-drag
+    // transform path, so no per-frame store writes (smoothness preserved).
+    const dragSet = new Set<string>(baseSelected)
+    baseSelected.forEach(id => {
+      const p = s.panels[id]
+      if (p && p.type === 'region') {
+        Object.values(s.panels).forEach(child => {
+          if (child.regionId === id) dragSet.add(child.id)
+        })
+      }
+    })
+    const positions = new Map<string, { x: number; y: number }>()
+    dragSet.forEach(id => {
+      const p = s.panels[id]
+      if (p) positions.set(id, { x: p.x, y: p.y })
+    })
+    initialPositions.current = positions
+  }, [panel.id, panel.type, panel.locked, panel.pinFront, panel.pinBack, panel.zIndex, onSelect, renaming, updatePanel, jumpModeActive])
+
+  const handleContextMenu = useCallback((e: React.MouseEvent) => {
+    if (jumpModeActive) return
+    e.preventDefault()
+    e.stopPropagation()
+    const s = useWorkspaceStore.getState()
+    if (!s.selectedPanelIds.includes(panel.id)) onSelect(panel.id, false)
+    setCtxMenu({ x: e.clientX, y: e.clientY })
+  }, [panel.id, onSelect, jumpModeActive])
+
+  const handleClose = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (confirmPanelsDeletion([panel])) deletePanel(panel.id)
+  }, [panel, deletePanel])
+
+  const handleResizeMouseDown = useCallback((dir: ResizeDir) => (e: React.MouseEvent) => {
+    e.stopPropagation()
+    e.preventDefault()
+    if (panel.locked) return
+    pushHistory()
+    setIsResizing(dir)
+    setResizeStart({
+      x: e.clientX,
+      y: e.clientY,
+      width: panel.width,
+      height: panel.height,
+      panelX: panel.x,
+      panelY: panel.y
+    })
+  }, [panel.width, panel.height, panel.x, panel.y, panel.locked, pushHistory])
+
+  const toggleMinimized = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation()
+    updatePanel(panel.id, { minimized: !panel.minimized })
+  }, [panel.id, panel.minimized, updatePanel])
+
+  const toggleLocked = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation()
+    updatePanel(panel.id, { locked: !panel.locked })
+  }, [panel.id, panel.locked, updatePanel])
+
+  const togglePinFront = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation()
+    // Clear pinBack on either transition to keep mutex consistent.
+    updatePanel(panel.id, { pinFront: !panel.pinFront, pinBack: false })
+  }, [panel.id, panel.pinFront, updatePanel])
+
+  useEffect(() => {
+    // PERF: during a drag we don't call onMove every frame — that would trigger a store
+    // commit and re-render the whole panel tree (including expensive webviews inside
+    // editors/browsers). Instead we apply CSS transform directly to each dragged panel's
+    // DOM element so the compositor moves them without layout/repaint. On mouseup we
+    // commit the final positions to the store in a single batch.
+    let pendingMove: MouseEvent | null = null
+    let rafId = 0
+    let dragCommit: null | (() => void) = null
+    let resizeCommit: null | (() => void) = null
+
+    const setPanelTransform = (id: string, dxWorld: number, dyWorld: number) => {
+      const el = document.querySelector(`.panel[data-panel-id="${id}"]`) as HTMLElement | null
+      if (el) el.style.transform = `translate3d(${dxWorld}px, ${dyWorld}px, 0)`
+    }
+
+    const applyMove = (e: MouseEvent) => {
+      if (isDragging) {
+        if (!dragMoved.current) {
+          const cdx = e.clientX - dragStartCursor.current.x
+          const cdy = e.clientY - dragStartCursor.current.y
+          if (Math.hypot(cdx, cdy) < 4) return
+          pushHistory()
+          dragMoved.current = true
+        }
+        const s = useWorkspaceStore.getState()
+        const viewport = s.viewport
+        const snapToGrid = s.snapToGrid
+        let newX = (e.clientX - dragStart.x - viewport.x) / viewport.zoom
+        let newY = (e.clientY - dragStart.y - viewport.y) / viewport.zoom
+
+        const initial = initialPositions.current
+        const isMulti = initial.size > 1
+        const anchor = isMulti ? initial.get(panel.id) : null
+
+        let snapX: number | null = null
+        let snapY: number | null = null
+        // All snap behavior (alignment guides + grid) gated behind the Snap toggle.
+        // When user turns Snap off, panel follows cursor exactly — no jerk anywhere.
+        // Shift always disables snap.
+        if (!isMulti && !e.shiftKey && snapToGrid) {
+          const tolWorld = SNAP_PX / viewport.zoom
+          const myL = newX
+          const myR = newX + panel.width
+          const myCx = newX + panel.width / 2
+          const myT = newY
+          const myB = newY + panel.height
+          const myCy = newY + panel.height / 2
+          const others = Object.values(s.panels).filter(p => p.id !== panel.id && p.type !== 'region')
+          const guides: Array<{ axis: 'x' | 'y'; world: number }> = []
+          let bestDx = tolWorld
+          let bestDy = tolWorld
+          others.forEach(p => {
+            const candX = [p.x, p.x + p.width / 2, p.x + p.width]
+            candX.forEach(cx => {
+              [myL, myCx, myR].forEach((my, i) => {
+                const d = Math.abs(cx - my)
+                if (d < bestDx) {
+                  bestDx = d
+                  snapX = cx - (i === 0 ? 0 : i === 1 ? panel.width / 2 : panel.width)
+                }
+              })
+            })
+            const candY = [p.y, p.y + p.height / 2, p.y + p.height]
+            candY.forEach(cy => {
+              [myT, myCy, myB].forEach((my, i) => {
+                const d = Math.abs(cy - my)
+                if (d < bestDy) {
+                  bestDy = d
+                  snapY = cy - (i === 0 ? 0 : i === 1 ? panel.height / 2 : panel.height)
+                }
+              })
+            })
+          })
+          if (snapX !== null) newX = snapX
+          if (snapY !== null) newY = snapY
+          if (snapX !== null) {
+            const lines = new Set<number>()
+            const x = snapX
+            ;[x, x + panel.width / 2, x + panel.width].forEach(v => lines.add(v))
+            others.forEach(p => {
+              [p.x, p.x + p.width / 2, p.x + p.width].forEach(v => {
+                lines.forEach(l => {
+                  if (Math.abs(l - v) < 0.5) guides.push({ axis: 'x', world: v })
+                })
+              })
+            })
+          }
+          if (snapY !== null) {
+            const lines = new Set<number>()
+            const y = snapY
+            ;[y, y + panel.height / 2, y + panel.height].forEach(v => lines.add(v))
+            others.forEach(p => {
+              [p.y, p.y + p.height / 2, p.y + p.height].forEach(v => {
+                lines.forEach(l => {
+                  if (Math.abs(l - v) < 0.5) guides.push({ axis: 'y', world: v })
+                })
+              })
+            })
+          }
+          setDragGuides(guides)
+        }
+
+        if (isMulti && anchor) {
+          let dx = newX - anchor.x
+          let dy = newY - anchor.y
+          if (snapToGrid) {
+            dx = Math.round(dx / 20) * 20
+            dy = Math.round(dy / 20) * 20
+          }
+          const finalPositions = new Map<string, { x: number; y: number }>()
+          initial.forEach((pos, id) => {
+            const nx = pos.x + dx, ny = pos.y + dy
+            setPanelTransform(id, nx - pos.x, ny - pos.y)
+            finalPositions.set(id, { x: nx, y: ny })
+          })
+          // CRITICAL: write final inline left/top AND clear transform BEFORE flushSync.
+          // Otherwise React commits new left/top while the transform offset is still on
+          // the DOM, briefly placing the panel at (finalX + dragOffset) — the jerk.
+          dragCommit = () => {
+            finalPositions.forEach((pos, id) => {
+              const el = document.querySelector(`.panel[data-panel-id="${id}"]`) as HTMLElement | null
+              if (el) {
+                el.style.left = `${pos.x}px`
+                el.style.top = `${pos.y}px`
+                el.style.transform = 'translateZ(0)'
+              }
+            })
+            flushSync(() => {
+              finalPositions.forEach((pos, id) => onMove(id, pos.x, pos.y))
+            })
+            // Region-membership recompute for moved panels. Skip the panels that
+            // were dragged as part of a region (they moved with their region, so
+            // membership doesn't change). Only check panels whose drag origin was
+            // a real user selection — not children expanded by the region-carry.
+            const s2 = useWorkspaceStore.getState()
+            const draggedIds = Array.from(finalPositions.keys())
+            const draggedRegionIds = new Set(
+              draggedIds.filter(id => s2.panels[id]?.type === 'region')
+            )
+            const toCheck = draggedIds.filter(id => {
+              const p = s2.panels[id]
+              if (!p || p.type === 'region') return false
+              // If this panel's regionId is a region also in the drag set, it
+              // moved with the region — don't reassign.
+              if (p.regionId && draggedRegionIds.has(p.regionId)) return false
+              return true
+            })
+            if (toCheck.length) s2.updateRegionMembership(toCheck)
+          }
+        } else {
+          let liveX = newX, liveY = newY
+          if (snapToGrid && !e.shiftKey) {
+            liveX = Math.round(liveX / 20) * 20
+            liveY = Math.round(liveY / 20) * 20
+          }
+          const anchorSingle = initial.get(panel.id) || { x: panel.x, y: panel.y }
+          setPanelTransform(panel.id, liveX - anchorSingle.x, liveY - anchorSingle.y)
+          const finalX = liveX, finalY = liveY
+
+          // Drag-onto-header → stack merge detection. Walk all visible panel
+          // headers (skipping self) and check if the cursor is inside one. The
+          // first hit becomes the drop target; visual highlight applied via the
+          // panels' .stack-drop-target class. Skip for regions.
+          if (panel.type !== 'region') {
+            const headers = document.querySelectorAll<HTMLElement>('.panel > .panel-header')
+            let hit: string | null = null
+            for (let i = 0; i < headers.length; i++) {
+              const h = headers[i]
+              const parent = h.parentElement as HTMLElement | null
+              if (!parent || parent === panelRef.current) continue
+              const pid = parent.getAttribute('data-panel-id')
+              if (!pid || pid === panel.id) continue
+              const r = h.getBoundingClientRect()
+              if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) {
+                // Also skip if target panel is itself stacked into someone else
+                // (we only merge into top-level hosts to keep tree flat).
+                const tp = useWorkspaceStore.getState().panels[pid]
+                if (tp && !tp.stackParentId && tp.type !== 'region') {
+                  hit = pid
+                  break
+                }
+              }
+            }
+            stackHitRef.current = hit
+            const cur = useWorkspaceStore.getState().stackDropTargetId
+            if (hit !== cur) useWorkspaceStore.getState().setStackDropTarget(hit)
+          }
+          // CRITICAL: write final inline left/top AND clear transform BEFORE flushSync.
+          // Otherwise React commits new left/top while the transform offset is still on
+          // the DOM, briefly placing the panel at (finalX + dragOffset) — the jerk.
+          dragCommit = () => {
+            // Stack merge takes priority — if cursor was over another panel's
+            // header at release, fold this panel into that one and skip the
+            // position commit (host's bbox wins).
+            const hit = stackHitRef.current
+            stackHitRef.current = null
+            const s2 = useWorkspaceStore.getState()
+            s2.setStackDropTarget(null)
+            if (hit && panel.type !== 'region') {
+              const el = panelRef.current
+              if (el) el.style.transform = 'translateZ(0)'  // clear drag offset
+              s2.stackPanels(hit, [panel.id])
+              return
+            }
+            const el = panelRef.current
+            if (el) {
+              el.style.left = `${finalX}px`
+              el.style.top = `${finalY}px`
+              el.style.transform = 'translateZ(0)'
+            }
+            flushSync(() => { onMove(panel.id, finalX, finalY) })
+            // Region-membership recompute for the moved panel (skip regions).
+            if (panel.type !== 'region') {
+              useWorkspaceStore.getState().updateRegionMembership([panel.id])
+            }
+          }
+        }
+      }
+
+      if (isResizing) {
+        // Resize updates the actual DOM size live (children need to reflow — terminal cols,
+        // webview viewport). But we still write through React state via onResize/onMove.
+        // We just commit-on-release path is shorter for resize too.
+        const viewport = useWorkspaceStore.getState().viewport
+        const dx = (e.clientX - resizeStart.x) / viewport.zoom
+        const dy = (e.clientY - resizeStart.y) / viewport.zoom
+        let { width, height, panelX: x, panelY: y } = resizeStart
+        const dir = isResizing
+        if (dir.includes('e')) width = Math.max(200, resizeStart.width + dx)
+        if (dir.includes('w')) {
+          width = Math.max(200, resizeStart.width - dx)
+          x = resizeStart.panelX + (resizeStart.width - width)
+        }
+        if (dir.includes('s')) height = Math.max(110, resizeStart.height + dy)
+        if (dir.includes('n')) {
+          height = Math.max(110, resizeStart.height - dy)
+          y = resizeStart.panelY + (resizeStart.height - height)
+        }
+        // Live DOM update for buttery feel — webview can still composite at its own rate.
+        const el = panelRef.current
+        if (el) {
+          el.style.width = `${width}px`
+          el.style.height = `${height}px`
+          if (x !== resizeStart.panelX || y !== resizeStart.panelY) {
+            el.style.left = `${x}px`
+            el.style.top = `${y}px`
+          }
+        }
+        // Commit on mouseup. flushSync forces React to re-render with the final size/pos
+        // synchronously, which overwrites our inline style.* writes via React's own
+        // style reconciliation.
+        resizeCommit = () => {
+          flushSync(() => {
+            onResize(panel.id, width, height)
+            if (x !== resizeStart.panelX || y !== resizeStart.panelY) onMove(panel.id, x, y)
+          })
+          // Region resize: clamp its children back inside the new bbox so shrinking
+          // doesn't orphan them visually.
+          if (panel.type === 'region') {
+            useWorkspaceStore.getState().clampChildrenToRegion(panel.id)
+          }
+        }
+      }
+    }
+
+    const handleMouseMove = (e: MouseEvent) => {
+      pendingMove = e
+      if (rafId !== 0) return
+      rafId = requestAnimationFrame(() => {
+        rafId = 0
+        const ev = pendingMove
+        pendingMove = null
+        if (ev) applyMove(ev)
+      })
+    }
+
+    const handleMouseUp = (e: MouseEvent) => {
+      if (rafId) cancelAnimationFrame(rafId)
+      rafId = 0
+      // Drain any mousemove that was batched into rAF but didn't run yet, so the
+      // dragCommit fires with cursor's true final position. Without this, releasing
+      // fast snaps the panel back to wherever the last rAF tick happened — the jitter.
+      const pending = pendingMove
+      pendingMove = null
+      if (pending) applyMove(pending)
+      // Also process mouseup's own coords (covers the case where user nudged cursor
+      // between last mousemove and release — mouseup carries the freshest position).
+      applyMove(e)
+      try { dragCommit?.() } catch { /* ignore */ }
+      try { resizeCommit?.() } catch { /* ignore */ }
+      dragCommit = null
+      resizeCommit = null
+      // Click-only on a multi-selected panel (no drag past threshold) → collapse selection
+      // to single now. Dragging consumed the intent → keep multi.
+      if (pendingCollapseToSingle.current && !dragMoved.current) {
+        useWorkspaceStore.getState().selectPanel(panel.id, false)
+      }
+      pendingCollapseToSingle.current = false
+      setIsDragging(false)
+      setIsResizing(null)
+      initialPositions.current.clear()
+      setDragGuides([])
+    }
+
+    if (isDragging || isResizing) {
+      window.addEventListener('mousemove', handleMouseMove)
+      window.addEventListener('mouseup', handleMouseUp)
+      return () => {
+        window.removeEventListener('mousemove', handleMouseMove)
+        window.removeEventListener('mouseup', handleMouseUp)
+        if (rafId) cancelAnimationFrame(rafId)
+      }
+    }
+    // panel.x / panel.y are intentionally NOT in deps — we read them lazily via the
+    // anchor positions snapshot (initialPositions) so changes mid-drag don't tear
+    // the effect down. The single-drag branch falls back to current panel.x/y if no
+    // anchor exists (first move before initialPositions populated).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDragging, isResizing, dragStart, resizeStart, panel.id, panel.width, panel.height, onMove, onResize, pushHistory, setDragGuides])
+
+  const handleNoteInput = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    updatePanel(panel.id, { content: e.target.value }, { skipHistory: true })
+  }, [panel.id, updatePanel])
+
+  const handleNoteFocus = useCallback(() => { pushHistory() }, [pushHistory])
+
+  // Esc is handled by the global cascade in App.tsx (blur note → focus panel outer → clear selection).
+  // No per-key note handling needed; the textarea's onKeyDown stays at the wrapper level.
+
+  const focusPanel = useCallback((additive: boolean) => {
+    onSelect(panel.id, additive)
+    if (panel.type !== 'region' && !panel.pinFront && !panel.pinBack) {
+      const all = Object.values(useWorkspaceStore.getState().panels)
+      const maxZ = Math.max(1, ...all.filter(p => !p.pinFront && !p.pinBack).map(p => p.zIndex || 1))
+      if ((panel.zIndex || 1) < maxZ) {
+        updatePanel(panel.id, { zIndex: maxZ + 1 }, { skipHistory: true })
+      }
+    }
+  }, [onSelect, panel.id, panel.type, panel.pinFront, panel.pinBack, panel.zIndex, updatePanel])
+
+  const handleBodyMouseDown = useCallback((e: React.MouseEvent) => {
+    focusPanel(e.shiftKey || e.ctrlKey || e.metaKey)
+    e.stopPropagation()
+  }, [focusPanel])
+
+  const getPanelClass = () => {
+    const classes = ['panel', `panel-type-${panel.type}`]
+    if (isSelected) classes.push('selected')
+    if (isDragging) classes.push('dragging')
+    if (panel.locked) classes.push('locked')
+    if (panel.minimized) classes.push('minimized')
+    if (sanitizeColor(panel.color)) classes.push('has-color')
+    if (panel.pinFront) classes.push('pin-front')
+    if (panel.pinBack) classes.push('pin-back')
+    if (panel.starred) classes.push('starred')
+    if (headerActiveId === panel.id) classes.push('header-active')
+    if (bodyActiveId === panel.id) classes.push('body-active')
+    if (offscreen) classes.push('offscreen')
+    if (panel.detached) classes.push('detached')
+    if (stackDropTargetId === panel.id) classes.push('stack-drop-target')
+    return classes.join(' ')
+  }
+
+  const regionCollapsed = panel.type === 'region' && (panel.settings as { collapsed?: boolean } | undefined)?.collapsed
+  // Stack host bits — list of stacked child panels + the currently-active id.
+  const isStackHost = !!(panel.stackChildren && panel.stackChildren.length > 0)
+  const allPanelsMap = useWorkspaceStore(s => s.panels)
+  const stackChildren = isStackHost ? (panel.stackChildren || []).map(id => allPanelsMap[id]).filter(Boolean) : []
+  const stackOrder: PanelType[] = isStackHost ? [panel, ...stackChildren] : []
+  const stackActiveId = isStackHost ? (panel.stackActive || panel.id) : panel.id
+  const setStackActive = useWorkspaceStore(s => s.setStackActive)
+  const unstackPanel = useWorkspaceStore(s => s.unstackPanel)
+  const lazyLoad = (panel.settings as { lazyLoad?: boolean } | undefined)?.lazyLoad === true
+  const loadSleepingPanel = () => {
+    updatePanel(panel.id, { settings: { ...(panel.settings || {}), lazyLoad: false } }, { skipHistory: true })
+  }
+
+  const renderContent = () => {
+    switch (panel.type) {
+      case 'terminal':
+        if (lazyLoad) return <SleepPlaceholder panel={panel} onLoad={loadSleepingPanel} />
+        return (
+          <div className="panel-content terminal-content" onMouseDown={handleBodyMouseDown}>
+            <TerminalPanel panel={panel} />
+          </div>
+        )
+      case 'editor':
+        if (lazyLoad) return <SleepPlaceholder panel={panel} onLoad={loadSleepingPanel} />
+        return (
+          <div className="panel-content editor-content" onMouseDown={handleBodyMouseDown}>
+            <EditorPanel panel={panel} />
+          </div>
+        )
+      case 'browser':
+        return <BrowserPanel panel={panel} />
+      case 'note': {
+        if (lazyLoad) return <SleepPlaceholder panel={panel} onLoad={loadSleepingPanel} />
+        const noteStyle: React.CSSProperties = {}
+        const noteColor = sanitizeColor(panel.color)
+        if (noteColor) {
+          const { fg, placeholder } = readableOn(noteColor)
+          ;(noteStyle as Record<string, string>)['--note-bg'] = noteColor
+          ;(noteStyle as Record<string, string>)['--note-fg'] = fg
+          ;(noteStyle as Record<string, string>)['--note-placeholder'] = placeholder
+        }
+        return (
+          <textarea
+            className="panel-content note-content"
+            style={noteStyle}
+            value={panel.content || ''}
+            onChange={handleNoteInput}
+            onFocus={handleNoteFocus}
+            onMouseDown={handleBodyMouseDown}
+            onClick={(e) => e.stopPropagation()}
+            placeholder="Write something..."
+            spellCheck={false}
+          />
+        )
+      }
+      case 'region':
+        if (lazyLoad) return <SleepPlaceholder panel={panel} onLoad={loadSleepingPanel} />
+        return (
+          <div className="panel-content region-content">
+            <span className="region-children">{panel.children?.length || 0} {(panel.children?.length || 0) === 1 ? 'panel' : 'panels'}</span>
+          </div>
+        )
+      default:
+        return <div className="panel-content">Unknown panel type</div>
+    }
+  }
+
+  const accent = sanitizeColor(panel.color)
+  const borderColor = isSelected ? undefined : accent
+
+  // 8-way resize for all panels including regions. Midpoint dots are rendered
+  // via CSS pseudo-elements on the n/s/e/w handles when type === 'region'.
+  const resizeDirs: ResizeDir[] = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw']
+
+  // Embedded mode: rendered inside another panel's stack body. No chrome,
+  // no positioning, no resize handles — just the inner content. Parent host
+  // handles selection + drag.
+  if (embedded) {
+    return (
+      <div className="panel-embedded" data-panel-id={panel.id} onMouseDown={(e) => { e.stopPropagation(); focusPanel(false) }}>
+        {renderContent()}
+      </div>
+    )
+  }
+
+  return (
+    <>
+      <div
+        ref={panelRef}
+        className={getPanelClass()}
+        style={{
+          left: panel.x,
+          top: panel.y,
+          width: panel.width,
+          height: panel.minimized || regionCollapsed ? 34 : panel.height,
+          zIndex: panel.pinFront ? 9000 : panel.pinBack ? 0 : panel.zIndex,
+          borderColor,
+          ['--accent' as string]: accent || ''
+        }}
+        onMouseDown={handleMouseDown}
+        onContextMenu={handleContextMenu}
+        data-panel-id={panel.id}
+        tabIndex={-1}
+      >
+        {accent && <div className="panel-accent-bar" style={{ background: accent }} />}
+        <div className="panel-header" onDoubleClick={(e) => { e.stopPropagation(); beginRename() }}>
+          <span className="panel-type-icon" aria-hidden>{TYPE_ICON[panel.type]}</span>
+          {renaming ? (
+            <input
+              ref={titleInputRef}
+              className="panel-title-input"
+              value={draftTitle}
+              onChange={(e) => setDraftTitle(e.target.value)}
+              onBlur={commitRename}
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+              onKeyDown={(e) => {
+                e.stopPropagation()
+                if (e.key === 'Enter') commitRename()
+                else if (e.key === 'Escape') cancelRename()
+              }}
+            />
+          ) : (
+            <div className="panel-title-wrap">
+              <span className="panel-title" title={panel.locked ? 'Locked — unlock to rename' : 'Double-click to rename'}>{panel.title}</span>
+              {panel.description && <span className="panel-description">{panel.description}</span>}
+            </div>
+          )}
+          {panel.starred && <span className="panel-locked-badge" title="Starred">★</span>}
+          {panel.locked && <span className="panel-locked-badge" title="Locked">🔒</span>}
+          <div className="panel-controls">
+            {!panel.locked && (
+              <button className="panel-control-btn" title="Rename" onClick={(e) => { e.stopPropagation(); beginRename() }} onMouseDown={(e) => e.stopPropagation()}>✎</button>
+            )}
+            {panel.type === 'region' && (
+              <button
+                className={`panel-control-btn ${regionCollapsed ? 'active' : ''}`}
+                title={regionCollapsed ? 'Expand region' : 'Collapse region'}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  updatePanel(panel.id, { settings: { ...(panel.settings || {}), collapsed: !regionCollapsed } })
+                }}
+                onMouseDown={(e) => e.stopPropagation()}
+              >{regionCollapsed ? '▸' : '▾'}</button>
+            )}
+            <button
+              className={`panel-control-btn ${panel.pinFront ? 'active pin' : ''}`}
+              title={panel.pinFront ? 'Unpin from front' : 'Pin to front'}
+              onClick={togglePinFront}
+              onMouseDown={(e) => e.stopPropagation()}
+            >📌</button>
+            <button className={`panel-control-btn ${panel.locked ? 'active' : ''}`} title={panel.locked ? 'Unlock' : 'Lock'} onClick={toggleLocked} onMouseDown={(e) => e.stopPropagation()}>{panel.locked ? '⚿' : '⚷'}</button>
+            <button className="panel-control-btn" title={panel.minimized ? 'Restore' : 'Minimize'} onClick={toggleMinimized} onMouseDown={(e) => e.stopPropagation()}>{panel.minimized ? '▢' : '▭'}</button>
+            <button className="panel-control-btn danger" title="Close" onClick={handleClose} onMouseDown={(e) => e.stopPropagation()}>×</button>
+          </div>
+        </div>
+        {isStackHost && !panel.minimized && (
+          <div className="panel-stack-tabs">
+            {stackOrder.map(p => (
+              <StackTabButton
+                key={p.id}
+                hostId={panel.id}
+                child={p}
+                active={p.id === stackActiveId}
+                isHostTab={p.id === panel.id}
+                onActivate={() => setStackActive(panel.id, p.id)}
+                onUnstack={() => unstackPanel(p.id)}
+                onContextMenu={(e) => {
+                  e.preventDefault(); e.stopPropagation()
+                  setCtxMenu({ x: e.clientX, y: e.clientY, targetPanel: p })
+                }}
+              />
+            ))}
+          </div>
+        )}
+        {!panel.minimized && !regionCollapsed && (
+          <div className="panel-body" tabIndex={-1}>
+            {isStackHost ? (
+              <div className="panel-stack-body">
+                {stackOrder.map(p => (
+                  <div
+                    key={p.id}
+                    className={`stack-pane ${p.id === stackActiveId ? 'visible' : ''}`}
+                  >
+                    {p.id === panel.id ? (
+                      renderContent()
+                    ) : (
+                      <Panel
+                        panel={p}
+                        isSelected={false}
+                        embedded
+                        onSelect={onSelect}
+                        onMove={onMove}
+                        onResize={onResize}
+                      />
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              renderContent()
+            )}
+          </div>
+        )}
+        {isSelected && !panel.minimized && !regionCollapsed && !panel.locked && resizeDirs.map(dir => (
+          <div
+            key={dir}
+            className={`resize-handle resize-${dir}`}
+            onMouseDown={handleResizeMouseDown(dir)}
+          />
+        ))}
+      </div>
+      {ctxMenu && (
+        <PanelContextMenu
+          panel={ctxMenu.targetPanel || panel}
+          x={ctxMenu.x}
+          y={ctxMenu.y}
+          onClose={() => setCtxMenu(null)}
+          onRename={() => {
+            // Rename targets whichever panel the menu was opened for.
+            const tid = (ctxMenu.targetPanel || panel).id
+            useWorkspaceStore.getState().requestRename(tid)
+          }}
+        />
+      )}
+    </>
+  )
+}
+
+interface StackTabBtnProps {
+  hostId: string
+  child: PanelType
+  active: boolean
+  isHostTab: boolean
+  onActivate: () => void
+  onUnstack: () => void
+  onContextMenu: (e: React.MouseEvent) => void
+}
+// A tab in a stacked panel's strip. Click → switch active. Drag past threshold
+// → unstack the panel AND let it follow the cursor until mouseup (user drops
+// it wherever they want). Right-click → full panel ctx (which has snap-back
+// unstack via "Unstack panel" item).
+const StackTabButton: React.FC<StackTabBtnProps> = ({ child, active, isHostTab, onActivate, onUnstack, onContextMenu }) => {
+  const onMouseDown = (e: React.MouseEvent) => {
+    if (e.button !== 0) return
+    e.stopPropagation()
+    const startX = e.clientX
+    const startY = e.clientY
+    let unstacked = false
+    let moved = false
+    let rafId = 0
+    let pending: MouseEvent | null = null
+
+    const apply = (ev: MouseEvent) => {
+      const dx = ev.clientX - startX
+      const dy = ev.clientY - startY
+      if (!moved && Math.hypot(dx, dy) > 8) moved = true
+      if (!moved) return
+      if (!unstacked) {
+        // Threshold crossed → unstack. The store places the panel beside the
+        // host with its original size; we then immediately move it under the
+        // cursor on subsequent ticks.
+        onUnstack()
+        unstacked = true
+      }
+      const s = useWorkspaceStore.getState()
+      const p = s.panels[child.id]
+      if (!p) return
+      const worldX = (ev.clientX - s.viewport.x) / s.viewport.zoom
+      const worldY = (ev.clientY - s.viewport.y) / s.viewport.zoom
+      // Anchor: cursor sits near the top-center of the panel (where the title is).
+      s.movePanel(child.id, worldX - p.width / 2, worldY - 18)
+    }
+
+    const onMove = (ev: MouseEvent) => {
+      pending = ev
+      if (rafId !== 0) return
+      rafId = requestAnimationFrame(() => {
+        rafId = 0
+        if (pending) apply(pending)
+        pending = null
+      })
+    }
+    const onUp = () => {
+      if (rafId) cancelAnimationFrame(rafId)
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+      if (!moved) onActivate()
+      else if (unstacked) {
+        // Select the freshly-dropped panel for immediate keyboard control.
+        useWorkspaceStore.getState().selectPanel(child.id)
+      }
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }
+  return (
+    <button
+      className={`stack-tab ${active ? 'active' : ''}`}
+      onMouseDown={onMouseDown}
+      onContextMenu={onContextMenu}
+      title={`${child.title} — drag down to unstack, right-click for options`}
+    >
+      <span className="stack-tab-icon" aria-hidden>{TYPE_ICON[child.type]}</span>
+      <span className="stack-tab-title">{child.title}</span>
+      {!isHostTab && (
+        <span
+          className="stack-tab-close"
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => { e.stopPropagation(); onUnstack() }}
+          title="Unstack this panel"
+        >×</span>
+      )}
+    </button>
+  )
+}
+
+export default Panel

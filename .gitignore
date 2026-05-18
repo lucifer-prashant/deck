@@ -1,0 +1,47 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Dependencies
+node_modules
+dist
+dist-electron
+release
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Testing
+coverage
+
+# Misc
+.cache/
+.turbo/
+
+# claude / agent working files (never tracked)
+.claude/
+.opencode/
+CLAUDE.md
+
+# local working notes (kept out of repo)
+TODO_FINAL_BOSS.txt
+FEATURES.txt
+token-usage-sidebar-feature-notes.txt

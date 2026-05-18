@@ -1,0 +1,69 @@
+.popout-shell {
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg, #1f2024);
+  color: var(--fg, #e6e8ec);
+  font-family: 'Inter', system-ui, sans-serif;
+  overflow: hidden;
+}
+.popout-bar {
+  height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  background: var(--panel-header-bg, #2a2c31);
+  border-bottom: 1px solid var(--panel-border, #3e3e42);
+  flex-shrink: 0;
+  -webkit-app-region: drag;
+}
+.popout-title { font-weight: 600; font-size: 13px; -webkit-app-region: no-drag; }
+.popout-meta {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  background: rgba(77,171,232,0.18);
+  color: #9ed1ff;
+  padding: 2px 7px;
+  border-radius: 3px;
+  -webkit-app-region: no-drag;
+}
+.popout-btn {
+  -webkit-app-region: no-drag;
+  background: rgba(77,171,232,0.14);
+  color: #9ed1ff;
+  border: 1px solid rgba(77,171,232,0.35);
+  padding: 4px 10px;
+  border-radius: 5px;
+  font-size: 11.5px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.popout-btn:hover:not(:disabled) { background: rgba(77,171,232,0.22); }
+.popout-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.popout-body {
+  flex: 1;
+  position: relative;
+  display: flex;
+  min-height: 0;
+}
+.popout-body > * { flex: 1; min-height: 0; }
+.popout-missing {
+  margin: auto;
+  font-size: 12px;
+  opacity: 0.65;
+}
+.popout-note {
+  width: 100%;
+  height: 100%;
+  border: none;
+  outline: none;
+  background: var(--bg);
+  color: var(--fg);
+  padding: 16px 18px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  resize: none;
+}

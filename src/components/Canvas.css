@@ -1,0 +1,25 @@
+.canvas-container { touch-action: none;
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  background: #1e1e1e;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  background-size: 20px 20px;
+  overflow: hidden;
+}
+
+.canvas-content {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+.canvas-selection-box {
+  position: fixed;
+  border: 1px solid rgba(0, 120, 212, 0.95);
+  background: rgba(0, 120, 212, 0.16);
+  pointer-events: none;
+  z-index: 5500;
+}

@@ -1,0 +1,199 @@
+.command-palette-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 86px;
+  background: rgba(0, 0, 0, 0.42);
+  animation: cp-fade 100ms ease-out;
+}
+
+@keyframes cp-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.command-palette-overlay { animation-duration: 80ms; }
+
+.command-palette {
+  width: min(640px, calc(100vw - 28px));
+  max-height: 70vh;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  background: #1d1f24; /* opaque — no backdrop-filter so highlight repaints are cheap */
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6), 0 1px 0 rgba(255,255,255,0.04) inset;
+  display: flex;
+  flex-direction: column;
+  animation: cp-pop 110ms cubic-bezier(0.22, 1, 0.36, 1);
+  contain: layout style paint;
+  transform: translateZ(0);
+  will-change: transform, opacity;
+}
+
+@keyframes cp-pop {
+  from { transform: translate3d(0, -4px, 0) scale(0.99); opacity: 0; }
+  to { transform: translate3d(0, 0, 0) scale(1); opacity: 1; }
+}
+
+.command-palette-header {
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  flex-shrink: 0;
+  gap: 10px;
+}
+
+.command-palette-prefix {
+  color: rgba(255,255,255,0.32);
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.command-palette-input {
+  flex: 1;
+  height: 52px;
+  border: 0;
+  background: transparent;
+  color: #f5f7fa;
+  font-size: 15px;
+  outline: none;
+  padding: 0;
+  font-family: inherit;
+  letter-spacing: -0.003em;
+}
+
+.command-palette-input::placeholder {
+  color: rgba(255,255,255,0.32);
+}
+
+.command-palette-count {
+  font-size: 11px;
+  color: rgba(255,255,255,0.4);
+  font-family: 'JetBrains Mono', monospace;
+  background: rgba(255,255,255,0.05);
+  padding: 2px 8px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.command-palette-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 6px 8px;
+}
+
+.command-palette-section {
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.34);
+  padding: 12px 12px 6px;
+  font-weight: 600;
+}
+
+.command-palette-item {
+  min-height: 38px;
+  border-radius: 6px;
+  padding: 0 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13.5px;
+  color: rgba(255,255,255,0.85);
+  /* No transition — instant highlight when mouse moves over items. */
+  transition: none;
+}
+
+.command-palette-item.selected {
+  background: #2a4b6e; /* solid, no transparency / no color-mix — instant repaint */
+  color: #fff;
+}
+
+.command-palette-glyph {
+  width: 16px;
+  text-align: center;
+  font-size: 12px;
+  color: rgba(255,255,255,0.5);
+  flex-shrink: 0;
+}
+
+.command-palette-item.selected .command-palette-glyph { color: #fff; }
+
+.command-palette-label {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.command-palette-label mark {
+  background: transparent;
+  color: #4dabe8;
+  font-weight: 600;
+}
+
+.command-palette-item.selected .command-palette-label mark {
+  color: #b9dcff;
+}
+
+.command-palette-category {
+  font-size: 10px;
+  color: rgba(255,255,255,0.32);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: rgba(255,255,255,0.04);
+  flex-shrink: 0;
+}
+
+.command-palette-item.selected .command-palette-category {
+  background: rgba(255,255,255,0.1);
+  color: rgba(255,255,255,0.8);
+}
+
+.command-palette-shortcut {
+  color: rgba(255,255,255,0.45);
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+  margin-left: 4px;
+  flex-shrink: 0;
+}
+
+.command-palette-item.selected .command-palette-shortcut {
+  color: rgba(255,255,255,0.85);
+}
+
+.command-palette-empty {
+  padding: 28px;
+  text-align: center;
+  color: rgba(255,255,255,0.45);
+  font-size: 13px;
+}
+
+.command-palette-footer {
+  display: flex;
+  gap: 14px;
+  padding: 8px 14px;
+  border-top: 1px solid rgba(255,255,255,0.06);
+  font-size: 11px;
+  color: rgba(255,255,255,0.45);
+  flex-shrink: 0;
+}
+
+.command-palette-footer kbd {
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-bottom-width: 2px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: #fff;
+  margin: 0 2px 0 0;
+}

@@ -1,0 +1,206 @@
+.empty-state {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.empty-card {
+  pointer-events: auto;
+  text-align: center;
+  padding: 36px 44px 28px;
+  border: 1px dashed rgba(255,255,255,0.12);
+  border-radius: 16px;
+  background: rgba(0,0,0,0.18);
+  max-width: 460px;
+  backdrop-filter: blur(6px);
+}
+
+.empty-card.welcome {
+  text-align: left;
+  max-width: 560px;
+  width: min(560px, calc(100vw - 64px));
+  padding: 28px 30px 24px;
+  background: rgba(0,0,0,0.32);
+  border: 1px solid rgba(255,255,255,0.08);
+  max-height: calc(100vh - 80px);
+  overflow-y: auto;
+}
+
+.welcome-head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 22px;
+}
+
+.welcome-head .empty-glyph {
+  margin: 0;
+  font-size: 44px;
+}
+
+.welcome-section {
+  margin-top: 16px;
+}
+
+.welcome-section-title {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(255,255,255,0.45);
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+
+.welcome-card .empty-actions,
+.empty-card.welcome .empty-actions {
+  margin-top: 0;
+  justify-content: flex-start;
+}
+
+.quick-btn {
+  display: inline-flex !important;
+  flex-direction: column;
+  align-items: flex-start !important;
+  gap: 4px !important;
+  min-width: 110px;
+}
+.quick-btn .quick-sub {
+  font-size: 10px;
+  color: rgba(255,255,255,0.4);
+  letter-spacing: 0.02em;
+}
+.quick-btn.preset-life:hover { background: rgba(255,193,7,0.14); border-color: rgba(255,193,7,0.4); }
+.quick-btn.preset-no-life:hover { background: rgba(124,58,237,0.16); border-color: rgba(124,58,237,0.4); }
+
+.welcome-recent {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.recent-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-radius: 7px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.03);
+  color: rgba(255,255,255,0.8);
+  font-size: 12.5px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 120ms ease;
+}
+.recent-row:hover {
+  background: rgba(77,171,232,0.12);
+  border-color: rgba(77,171,232,0.4);
+  color: #fff;
+}
+.recent-name { font-weight: 500; }
+.recent-meta { font-size: 11px; opacity: 0.55; }
+
+.welcome-tips {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 14px;
+}
+.tip-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: rgba(255,255,255,0.65);
+}
+.tip-row kbd {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.1);
+  padding: 2px 6px;
+  border-radius: 3px;
+  min-width: 28px;
+  text-align: center;
+}
+
+.empty-glyph {
+  font-size: 56px;
+  color: rgba(255,255,255,0.18);
+  line-height: 1;
+  margin-bottom: 12px;
+}
+
+.empty-title {
+  font-size: 22px;
+  font-weight: 600;
+  color: rgba(255,255,255,0.85);
+  letter-spacing: 0.01em;
+}
+
+.empty-sub {
+  margin-top: 6px;
+  font-size: 13px;
+  color: rgba(255,255,255,0.5);
+  max-width: 340px;
+  margin-left: auto;
+  margin-right: auto;
+  line-height: 1.5;
+}
+
+.empty-actions {
+  margin-top: 22px;
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.empty-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(255,255,255,0.05);
+  color: rgba(255,255,255,0.85);
+  font-size: 12.5px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.12s;
+}
+
+.empty-actions button:hover {
+  background: rgba(0,120,212,0.18);
+  border-color: rgba(0,120,212,0.45);
+  color: #fff;
+  transform: translateY(-1px);
+}
+
+.empty-key {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  background: rgba(255,255,255,0.12);
+  padding: 2px 6px;
+  border-radius: 3px;
+  color: rgba(255,255,255,0.7);
+}
+
+.empty-hint {
+  margin-top: 18px;
+  font-size: 11px;
+  color: rgba(255,255,255,0.35);
+}
+
+.empty-hint kbd {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.1);
+  padding: 1px 5px;
+  border-radius: 3px;
+  margin: 0 2px;
+}

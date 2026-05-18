@@ -1,0 +1,69 @@
+.panel-finder-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10001;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 86px;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.panel-finder {
+  width: min(520px, calc(100vw - 28px));
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background: rgba(31, 33, 38, 0.96);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(16px);
+}
+
+.panel-finder-input {
+  width: 100%;
+  height: 46px;
+  border: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+  color: #f5f7fa;
+  outline: none;
+  padding: 0 16px;
+  font-size: 15px;
+}
+
+.panel-finder-list {
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.panel-finder-item {
+  width: 100%;
+  min-height: 38px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #d9dee5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 10px;
+  cursor: pointer;
+}
+
+.panel-finder-item:hover,
+.panel-finder-item.selected {
+  background: rgba(0, 120, 212, 0.22);
+  color: #fff;
+}
+
+.panel-finder-item span:last-child {
+  color: #98a2ad;
+  font-size: 12px;
+}
+
+.panel-finder-empty {
+  padding: 20px;
+  text-align: center;
+  color: #8f99a5;
+}

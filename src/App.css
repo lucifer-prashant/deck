@@ -1,0 +1,428 @@
+:root,
+[data-theme='dark'] {
+  --bg: #1f2024;
+  --bg-grid: #25272c;
+  --bg-grid-bold: #32353c;
+  --fg: #e6e8ec;
+  --fg-muted: #bfc4cb;
+  --panel-bg: #2d2d30;
+  --panel-header-bg: #3a3a3f;
+  --panel-border: #3e3e42;
+  --panel-title: #d4d7dc;
+  --chrome-bg: rgba(28, 30, 34, 0.92);
+  --chrome-border: rgba(255, 255, 255, 0.1);
+  --status-bg: rgba(18, 20, 24, 0.92);
+  --selection-color: #4dabe8;
+  --menu-bg: rgba(28, 30, 34, 0.98);
+  --menu-fg: #e6e8ec;
+  --menu-border: rgba(255,255,255,0.12);
+  --menu-hover: rgba(0, 120, 212, 0.22);
+}
+
+[data-theme='midnight'] {
+  --bg: #0d1117;
+  --bg-grid: #131822;
+  --bg-grid-bold: #1c2230;
+  --fg: #e6edf3;
+  --fg-muted: #9aa6b2;
+  --panel-bg: #161b22;
+  --panel-header-bg: #1f2630;
+  --panel-border: #2a3140;
+  --panel-title: #d5dde6;
+  --chrome-bg: rgba(13, 17, 23, 0.94);
+  --chrome-border: rgba(255, 255, 255, 0.06);
+  --status-bg: rgba(8, 11, 16, 0.94);
+  --selection-color: #58a6ff;
+}
+
+[data-theme='light'] {
+  --bg: #f5f6f8;
+  --bg-grid: #ebedf0;
+  --bg-grid-bold: #d8dbe0;
+  --fg: #1a1d22;
+  --fg-muted: #5b6470;
+  --panel-bg: #ffffff;
+  --panel-header-bg: #eef0f3;
+  --panel-border: #d0d4da;
+  --panel-title: #1f2329;
+  --chrome-bg: rgba(248, 249, 251, 0.94);
+  --chrome-border: rgba(0, 0, 0, 0.08);
+  --status-bg: rgba(238, 240, 243, 0.94);
+  --selection-color: #2563eb;
+  --menu-bg: rgba(255, 255, 255, 0.99);
+  --menu-fg: #1a1d22;
+  --menu-border: rgba(0,0,0,0.1);
+  --menu-hover: rgba(37, 99, 235, 0.12);
+}
+
+/* 'system' is resolved to dark or light at runtime via a class toggle on <html>.
+   Default to dark colors when JS hasn't yet set it. */
+[data-theme='system'] {
+  color-scheme: dark light;
+}
+
+/* === LIGHT THEME — flip hardcoded dark surfaces ===
+   Components that rely on CSS vars get rethemed automatically. This block
+   handles places where colors were hardcoded (sidebar gradients, ctx menu
+   alpha overlays, browser chrome, etc.) so the whole UI reads cleanly. */
+[data-theme='light'] .sidebar {
+  background:
+    radial-gradient(120% 80% at 0% 0%, rgba(37,99,235,0.05), transparent 60%),
+    linear-gradient(180deg, rgba(248,249,251,0.98), rgba(238,240,243,0.98));
+  color: #1a1d22;
+  border-right: 1px solid rgba(0,0,0,0.08);
+  box-shadow: 12px 0 40px rgba(0,0,0,0.08);
+}
+[data-theme='light'] .sidebar-tabs {
+  background: rgba(0,0,0,0.03);
+  border-bottom: 1px solid rgba(0,0,0,0.06);
+}
+[data-theme='light'] .sidebar-tab {
+  color: rgba(0,0,0,0.5);
+}
+[data-theme='light'] .sidebar-tab:hover {
+  background: rgba(0,0,0,0.05);
+  color: #1a1d22;
+}
+[data-theme='light'] .sidebar-tab.active {
+  background: linear-gradient(180deg, rgba(37,99,235,0.15), rgba(37,99,235,0.08));
+  color: #1d4ed8;
+  border-color: rgba(37,99,235,0.35);
+}
+[data-theme='light'] .sidebar-close { color: rgba(0,0,0,0.45); }
+[data-theme='light'] .sidebar-close:hover { background: rgba(0,0,0,0.08); color: #1a1d22; }
+[data-theme='light'] .sidebar-context { background: rgba(0,0,0,0.025); }
+[data-theme='light'] .sidebar-ctx-type { background: rgba(37,99,235,0.18); color: #1d4ed8; }
+[data-theme='light'] .ctx-menu {
+  background: var(--menu-bg, rgba(255,255,255,0.99));
+  color: var(--menu-fg, #1a1d22);
+  border: 1px solid var(--menu-border, rgba(0,0,0,0.1));
+  box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+}
+[data-theme='light'] .ctx-item { color: #1a1d22; }
+[data-theme='light'] .ctx-item:hover { background: var(--menu-hover, rgba(37,99,235,0.12)); }
+[data-theme='light'] .ctx-kbd { color: rgba(0,0,0,0.45); }
+[data-theme='light'] .ctx-sep { background: rgba(0,0,0,0.08); }
+
+/* Panels */
+[data-theme='light'] .panel {
+  background: var(--panel-bg);
+  color: var(--fg);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.05), 0 8px 24px -10px rgba(0,0,0,0.1);
+}
+[data-theme='light'] .panel-header {
+  background: var(--panel-header-bg);
+  color: var(--panel-title);
+  border-bottom: 1px solid rgba(0,0,0,0.06);
+}
+[data-theme='light'] .panel-title { color: var(--panel-title); }
+[data-theme='light'] .panel-control-btn { color: rgba(0,0,0,0.55); }
+[data-theme='light'] .panel-control-btn:hover { background: rgba(0,0,0,0.06); color: #1a1d22; }
+[data-theme='light'] .panel-control-btn.danger:hover { background: rgba(220,38,38,0.12); color: #b91c1c; }
+
+/* Chrome / status / command palette */
+[data-theme='light'] .workspace-chrome {
+  background: var(--chrome-bg);
+  color: var(--fg);
+  border-bottom: 1px solid var(--chrome-border);
+}
+[data-theme='light'] .chrome-chip {
+  background: rgba(0,0,0,0.04);
+  color: #1a1d22;
+  border: 1px solid rgba(0,0,0,0.08);
+}
+[data-theme='light'] .chrome-chip:hover { background: rgba(0,0,0,0.08); }
+[data-theme='light'] .chrome-chip.active { background: rgba(37,99,235,0.16); color: #1d4ed8; border-color: rgba(37,99,235,0.4); }
+[data-theme='light'] .chrome-readout { color: rgba(0,0,0,0.55); }
+[data-theme='light'] .workspace-tab { color: rgba(0,0,0,0.55); }
+[data-theme='light'] .workspace-tab:hover { background: rgba(0,0,0,0.05); color: #1a1d22; }
+[data-theme='light'] .workspace-tab.active { background: rgba(37,99,235,0.14); color: #1d4ed8; }
+[data-theme='light'] .status-bar { background: var(--status-bg); color: var(--fg); border-top: 1px solid var(--chrome-border); }
+[data-theme='light'] .status-chip { color: #1a1d22; background: rgba(0,0,0,0.04); }
+[data-theme='light'] .status-chip:hover { background: rgba(0,0,0,0.08); }
+[data-theme='light'] .status-chip.toggle.on { background: rgba(37,99,235,0.18); color: #1d4ed8; }
+
+/* Outliner */
+[data-theme='light'] .outliner {
+  background: rgba(248,249,251,0.98);
+  color: #1a1d22;
+  border-right: 1px solid rgba(0,0,0,0.08);
+}
+[data-theme='light'] .outliner-row { color: rgba(0,0,0,0.7); }
+[data-theme='light'] .outliner-row:hover { background: rgba(0,0,0,0.05); }
+[data-theme='light'] .outliner-row.selected { background: rgba(37,99,235,0.16); color: #1d4ed8; }
+
+/* Browser chrome — keep dark feel but soften (browser content is web pages anyway).
+   Optional: leave browser dark since most users want dark chrome regardless. */
+
+/* Command palette */
+[data-theme='light'] .cmd-palette {
+  background: rgba(255,255,255,0.98);
+  color: #1a1d22;
+  border: 1px solid rgba(0,0,0,0.1);
+  box-shadow: 0 24px 64px rgba(0,0,0,0.18);
+}
+[data-theme='light'] .cmd-palette-input { color: #1a1d22; }
+[data-theme='light'] .cmd-row { color: #1a1d22; }
+[data-theme='light'] .cmd-row.selected { background: rgba(37,99,235,0.14); }
+
+/* Empty state / help overlay */
+[data-theme='light'] .empty-state { color: rgba(0,0,0,0.7); }
+[data-theme='light'] .empty-state .quick-btn { background: rgba(0,0,0,0.04); color: #1a1d22; border-color: rgba(0,0,0,0.1); }
+[data-theme='light'] .empty-state .quick-btn:hover { background: rgba(37,99,235,0.1); border-color: rgba(37,99,235,0.4); }
+
+/* Git section adjustments — keep readable on light */
+[data-theme='light'] .git-section, [data-theme='light'] .sidebar-section { color: #1a1d22; }
+[data-theme='light'] .git-commit-input, [data-theme='light'] .git-commit-input:focus {
+  background: rgba(0,0,0,0.04);
+  color: #1a1d22;
+  border: 1px solid rgba(0,0,0,0.12);
+}
+[data-theme='light'] .git-btn { background: rgba(0,0,0,0.05); color: #1a1d22; border: 1px solid rgba(0,0,0,0.1); }
+[data-theme='light'] .git-btn:hover:not(.disabled) { background: rgba(0,0,0,0.08); }
+[data-theme='light'] .git-btn.primary { background: rgba(37,99,235,0.16); color: #1d4ed8; border-color: rgba(37,99,235,0.4); }
+[data-theme='light'] .git-file-row:hover { background: rgba(0,0,0,0.04); }
+[data-theme='light'] .git-clean { color: rgba(0,0,0,0.55); }
+[data-theme='light'] .git-branch-name { color: #1d4ed8; }
+[data-theme='light'] .git-chip.up { background: rgba(22,163,74,0.15); color: #166534; }
+[data-theme='light'] .git-chip.down { background: rgba(220,38,38,0.15); color: #991b1b; }
+[data-theme='light'] .git-chip.muted { background: rgba(0,0,0,0.05); color: rgba(0,0,0,0.55); }
+[data-theme='light'] .git-chip.clean { background: rgba(22,163,74,0.12); color: #166534; }
+
+/* Light theme — sidebar section + status bar text contrast fixes */
+[data-theme='light'] .sidebar-section-title { color: #1a1d22; opacity: 0.85; }
+[data-theme='light'] .sidebar-section-head { color: #1a1d22; }
+[data-theme='light'] .sidebar-ctx-path { color: rgba(0,0,0,0.55); }
+[data-theme='light'] .sidebar-ctx-project { color: rgba(0,0,0,0.65); }
+[data-theme='light'] .tree-row { color: rgba(0,0,0,0.78); }
+[data-theme='light'] .tree-row:hover { background: rgba(0,0,0,0.05); color: #1a1d22; }
+[data-theme='light'] .tree-icon { opacity: 0.65; }
+[data-theme='light'] .tree-name { color: rgba(0,0,0,0.85); }
+[data-theme='light'] .tree-caret { color: rgba(0,0,0,0.45); }
+[data-theme='light'] .tree-empty,
+[data-theme='light'] .tree-err,
+[data-theme='light'] .tree-loading { color: rgba(0,0,0,0.45); }
+[data-theme='light'] .status-item.summary { color: rgba(0,0,0,0.75); }
+[data-theme='light'] .status-item.mono { color: rgba(0,0,0,0.55); }
+[data-theme='light'] .status-bar { color: #1a1d22; }
+[data-theme='light'] .sidebar-pin { color: rgba(0,0,0,0.5); }
+[data-theme='light'] .sidebar-pin:hover { color: #1a1d22; background: rgba(0,0,0,0.06); }
+[data-theme='light'] .sidebar-tab-label { color: inherit; }
+[data-theme='light'] .git-group-head { color: rgba(0,0,0,0.55); }
+[data-theme='light'] .git-file-name { color: rgba(0,0,0,0.85); }
+[data-theme='light'] .git-file-action { color: rgba(0,0,0,0.5); background: rgba(0,0,0,0.04); }
+[data-theme='light'] .git-file-action:hover { background: rgba(0,0,0,0.08); color: #1a1d22; }
+[data-theme='light'] .git-clean { color: rgba(0,0,0,0.55); }
+[data-theme='light'] .git-worktree-path { color: rgba(0,0,0,0.5); }
+
+/* Settings pane dropdowns — force color-scheme so OS-rendered <option>
+   list inherits the right palette. */
+.settings-panel { color-scheme: dark; }
+[data-theme='light'] .settings-panel { color-scheme: light; }
+.settings-panel select option { background: #1a1c20; color: #e6e8ec; }
+[data-theme='light'] .settings-panel select option { background: #ffffff; color: #1a1d22; }
+[data-theme='light'] .settings-panel input,
+[data-theme='light'] .settings-panel select {
+  background: #ffffff !important;
+  color: #1a1d22 !important;
+  border: 1px solid rgba(0,0,0,0.18) !important;
+}
+
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-size: 13px;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--selection-color) 35%, transparent);
+  color: inherit;
+}
+
+/* Subtle scrollbar */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.08);
+  border-radius: 6px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.18); background-clip: padding-box; border: 2px solid transparent; }
+
+.app {
+  width: 100vw;
+  height: 100vh;
+  position: relative;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.canvas-container {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  overflow: hidden;
+  background: var(--bg);
+  cursor: grab;
+}
+
+.canvas-container.grabbing { cursor: grabbing; }
+
+.canvas-content {
+  position: absolute;
+  transform-origin: 0 0;
+  width: 100%;
+  height: 100%;
+  will-change: transform;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+}
+
+.canvas-content.smooth {
+  transition: transform 260ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+button, .chrome-chip, .status-chip, .panel-control-btn, .ctx-item, .workspace-tab {
+  transition: background 160ms ease, border-color 160ms ease, color 160ms ease, transform 140ms cubic-bezier(0.22, 1, 0.36, 1), opacity 140ms ease, box-shadow 160ms ease;
+}
+
+/* No transform transition — drag-end was animating a tiny residual transform diff
+   for 140ms after the .dragging class came off, producing a visible jerk/slide.
+   Drag/resize handle their own movement; transitions belong only to selection chrome. */
+.panel {
+  transition: box-shadow 200ms cubic-bezier(0.22, 1, 0.36, 1), border-color 200ms ease;
+}
+
+.panel.dragging { transition: none; }
+
+@keyframes wts-fade-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: none; }
+}
+
+.align-guide {
+  position: absolute;
+  pointer-events: none;
+  z-index: 9999;
+}
+
+.align-guide.v {
+  width: 0;
+  border-left: 1px dashed #ff66cc;
+}
+
+.align-guide.h {
+  height: 0;
+  border-top: 1px dashed #ff66cc;
+}
+
+button:focus-visible, .chrome-chip:focus-visible, .status-chip:focus-visible, .panel-control-btn:focus-visible, .ctx-item:focus-visible, .workspace-tab:focus-visible {
+  outline: 2px solid var(--selection-color, #4dabe8);
+  outline-offset: 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .canvas-content, .canvas-content.smooth {
+    transition: none !important;
+  }
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+.jump-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 11000;
+  pointer-events: none;
+  background: rgba(0, 0, 0, 0.32);
+  backdrop-filter: blur(6px) saturate(120%);
+  -webkit-backdrop-filter: blur(6px) saturate(120%);
+}
+
+.jump-letter {
+  position: absolute;
+  z-index: 11500;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  font-size: 32px;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+  background: #4dabe8;
+  color: #0a1622;
+  border-radius: 12px;
+  box-shadow: 0 10px 28px rgba(0,0,0,0.6), 0 0 0 3px rgba(77, 171, 232, 0.55);
+  transform: translate(-50%, -50%) translateZ(0);
+  will-change: transform;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
+  animation: jump-pop 140ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes jump-pop {
+  from { transform: translate(-50%, -50%) scale(0.4); opacity: 0; }
+  to { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+}
+
+.chrome-peek {
+  position: fixed;
+  top: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6000;
+  width: 30px;
+  height: 28px;
+  border: 1px solid var(--chrome-border, rgba(255,255,255,0.1));
+  background: var(--chrome-bg, rgba(22,24,28,0.92));
+  color: rgba(255,255,255,0.7);
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  font-family: inherit;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.32);
+  backdrop-filter: blur(12px) saturate(140%);
+  opacity: 0.45;
+  transition: opacity 140ms ease, background 140ms ease;
+}
+
+.chrome-peek:hover {
+  opacity: 1;
+  color: #fff;
+}
+
+.chrome-peek.bottom {
+  top: auto;
+  bottom: 6px;
+}
+
+.jump-banner {
+  position: fixed;
+  top: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 11500;
+  pointer-events: none;
+  background: rgba(20, 22, 26, 0.94);
+  color: #cfe6ff;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-family: 'JetBrains Mono', monospace;
+  letter-spacing: 0.06em;
+  border: 1px solid rgba(77, 171, 232, 0.3);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+}

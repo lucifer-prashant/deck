@@ -1,0 +1,108 @@
+.status-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 28px;
+  z-index: 5800;
+  background: var(--status-bg, #14161a);
+  border-top: 1px solid var(--chrome-border, rgba(255,255,255,0.06));
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: -0.003em;
+  color: rgba(255,255,255,0.7);
+  user-select: none;
+  contain: layout style;
+}
+
+.status-left, .status-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.status-item {
+  white-space: nowrap;
+}
+
+.status-item.mono {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: rgba(255,255,255,0.55);
+  min-width: 56px;
+  text-align: right;
+}
+
+.summary {
+  font-weight: 500;
+  color: rgba(255,255,255,0.82);
+}
+
+.status-sep {
+  width: 1px;
+  height: 14px;
+  background: rgba(255,255,255,0.12);
+  margin: 0 4px;
+}
+
+.status-chip {
+  height: 22px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.04);
+  color: rgba(255,255,255,0.75);
+  border-radius: 4px;
+  padding: 0 8px;
+  font-size: 11px;
+  cursor: pointer;
+  font-family: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.status-chip:hover:not(:disabled) {
+  background: rgba(255,255,255,0.1);
+  color: #fff;
+}
+
+.status-chip:disabled {
+  opacity: 0.32;
+  cursor: not-allowed;
+}
+
+.status-chip.ghost {
+  border-color: transparent;
+  background: transparent;
+}
+
+.status-chip.toggle.on {
+  background: rgba(0,120,212,0.25);
+  border-color: rgba(0,120,212,0.45);
+  color: #fff;
+}
+
+.status-chip.preset {
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+.status-chip.preset.life {
+  background: rgba(192, 38, 211, 0.18);
+  color: #f0abfc;
+  border-color: rgba(192, 38, 211, 0.45);
+}
+.status-chip.preset.life:hover { background: rgba(192, 38, 211, 0.3); color: #fff; }
+.status-chip.preset.no-life {
+  background: rgba(71, 85, 105, 0.32);
+  color: #cbd5e1;
+  border-color: rgba(148, 163, 184, 0.42);
+}
+.status-chip.preset.no-life:hover { background: rgba(71, 85, 105, 0.5); color: #fff; }
+
+.status-chip.help {
+  font-weight: 700;
+  font-size: 13px;
+}

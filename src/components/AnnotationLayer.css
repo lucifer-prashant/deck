@@ -1,0 +1,98 @@
+.anno-sticky {
+  position: absolute;
+  min-width: 140px;
+  min-height: 100px;
+  padding: 6px 8px 8px;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.25), 0 1px 0 rgba(255,255,255,0.1) inset;
+  color: #1a1d22;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 12px;
+  cursor: grab;
+  user-select: none;
+  display: flex;
+  flex-direction: column;
+  z-index: 5;
+}
+.anno-sticky:active { cursor: grabbing; }
+
+.anno-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 120ms;
+}
+.anno-sticky:hover .anno-toolbar { opacity: 1; }
+
+.anno-btn {
+  width: 18px;
+  height: 18px;
+  border: none;
+  background: rgba(0,0,0,0.06);
+  color: inherit;
+  border-radius: 3px;
+  font-size: 11px;
+  cursor: pointer;
+  font-family: inherit;
+  padding: 0;
+}
+.anno-btn:hover { background: rgba(0,0,0,0.14); }
+.anno-btn.danger:hover { background: rgba(220,38,38,0.18); color: #b91c1c; }
+
+.anno-color-row {
+  display: flex;
+  gap: 3px;
+  padding: 2px 0;
+}
+.anno-swatch {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1px solid rgba(0,0,0,0.15);
+  cursor: pointer;
+}
+.anno-swatch:hover { transform: scale(1.12); }
+
+.anno-sticky-input {
+  flex: 1;
+  width: 100%;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  font-size: inherit;
+  resize: none;
+  padding: 2px 0;
+}
+.anno-sticky-text {
+  flex: 1;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow: hidden;
+  padding: 2px 0;
+}
+
+.anno-label {
+  position: absolute;
+  padding: 2px 8px;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: grab;
+  user-select: none;
+  letter-spacing: 0.01em;
+  z-index: 5;
+}
+.anno-label:active { cursor: grabbing; }
+.anno-label-input {
+  background: rgba(0,0,0,0.6);
+  color: inherit;
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: inherit;
+  font-family: inherit;
+  outline: none;
+}

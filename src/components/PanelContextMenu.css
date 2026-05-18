@@ -1,0 +1,96 @@
+.ctx-menu {
+  position: fixed;
+  z-index: 10000;
+  min-width: 220px;
+  background: var(--menu-bg, rgba(28, 30, 34, 0.98));
+  border: 1px solid var(--menu-border, rgba(255,255,255,0.12));
+  border-radius: 8px;
+  padding: 6px;
+  box-shadow: 0 18px 48px rgba(0,0,0,0.55);
+  backdrop-filter: blur(14px);
+  font-size: 13px;
+  color: var(--menu-fg, #e6e8ec);
+  animation: ctx-pop 0.08s ease-out;
+}
+
+@keyframes ctx-pop {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.ctx-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  font-size: 13px;
+  gap: 16px;
+}
+
+.ctx-item:hover {
+  background: var(--menu-hover, rgba(0, 120, 212, 0.22));
+  color: #fff;
+}
+
+.ctx-item:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.ctx-item:disabled:hover {
+  background: transparent;
+  color: inherit;
+}
+
+.ctx-item.danger:hover {
+  background: rgba(220, 38, 38, 0.28);
+  color: #fff;
+}
+
+.ctx-kbd {
+  font-size: 10.5px;
+  color: rgba(255,255,255,0.4);
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.ctx-sep {
+  height: 1px;
+  background: rgba(255,255,255,0.08);
+  margin: 4px 2px;
+}
+
+.ctx-section {
+  padding: 4px 10px 2px;
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: rgba(255,255,255,0.45);
+}
+
+.ctx-colors {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 4px;
+  padding: 4px 8px 6px;
+}
+
+.ctx-swatch {
+  height: 20px;
+  border-radius: 4px;
+  border: 2px solid rgba(255,255,255,0.3);
+  cursor: pointer;
+  padding: 0;
+  transition: transform 0.1s;
+}
+
+.ctx-swatch:hover { transform: scale(1.12); }
+.ctx-swatch.active {
+  box-shadow: 0 0 0 2px #fff inset, 0 0 0 1px rgba(0,0,0,0.6);
+}

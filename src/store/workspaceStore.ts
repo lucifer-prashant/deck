@@ -1,0 +1,1186 @@
+import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
+
+export type Theme = 'dark' | 'midnight' | 'light' | 'system'
+
+export interface Panel {
+  id: string
+  type: 'terminal' | 'editor' | 'browser' | 'note' | 'region'
+  x: number
+  y: number
+  width: number
+  height: number
+  title: string
+  content?: string
+  children?: string[]
+  regionId?: string
+  detached?: boolean  // currently shown in a separate BrowserWindow
+  // Docking / tab stacks. When `stackChildren` is set on a panel, that panel
+  // is the host: it provides the bbox + tab strip and visually contains the
+  // listed child panels. Each child gets `stackParentId` set so canvas hides
+  // them from standalone rendering. `stackActive` is the id of the panel
+  // whose body is currently visible — defaults to the host itself.
+  stackParentId?: string
+  stackChildren?: string[]
+  stackActive?: string
+  // Bbox the panel had before being stacked — restored on unstack/pop-out so
+  // small panels don't end up host-sized after coming out of a stack.
+  preStackBbox?: { x: number; y: number; width: number; height: number }
+  projectId?: string
+  worktreeId?: string
+  zIndex?: number
+  color?: string
+  locked?: boolean
+  minimized?: boolean
+  pinFront?: boolean
+  pinBack?: boolean
+  starred?: boolean
+  description?: string
+  settings?: Record<string, unknown>
+  createdAt?: number
+  updatedAt?: number
+  // Context — used by the sidebar to know which folder/repo/project this panel is in.
+  // Inferred by panel-type-specific logic (editor uses folderPath, terminal uses cwd, etc.)
+  // Sidebar reads context from the most-recently-active panel.
+  projectPath?: string
+  cwd?: string
+  filePath?: string
+  repoRoot?: string
+  folderPath?: string
+  notePath?: string
+}
+
+export type SidebarSection = 'explorer' | 'git' | 'tokens' | 'notes' | 'outline'
+
+export interface Viewport {
+  x: number
+  y: number
+  zoom: number
+}
+
+export interface Annotation {
+  id: string
+  type: 'sticky' | 'label'
+  x: number
+  y: number
+  width: number
+  height: number
+  text: string
+  color: string  // CSS color or empty for default
+}
+
+export interface WorkspaceTab {
+  id: string
+  title: string
+  panels: Record<string, Panel>
+  viewport: Viewport
+  selectedPanelIds: string[]
+  annotations?: Annotation[]
+  createdAt: number
+  color?: string
+  lastSavedAt?: number
+  lastEditedAt?: number
+  // Marks this tab as belonging to a preset. Survives renames. Used so closing/deleting
+  // panels in a preset can be tracked in `presetGraveyards` and re-restored next time
+  // the user loads the preset.
+  kind?: 'preset:life' | 'preset:no-life'
+}
+
+// Last-known state of preset panels the user has deleted. When the user re-runs
+// loadPreset(name), any preset spec panel that's missing from the current tab is
+// restored from this graveyard at its last position/size — or from preset defaults
+// if it was never touched.
+export type PresetGraveyards = Record<string, Record<string, Partial<Panel>>>
+
+export interface JumpMode {
+  active: boolean
+  letters: Record<string, string> // letter -> panel id
+}
+
+interface HistorySnapshot {
+  panels: Record<string, Panel>
+  selectedPanelIds: string[]
+}
+
+const HISTORY_LIMIT = 80
+
+export interface WorkspaceState {
+  panels: Record<string, Panel>
+  selectedPanelIds: string[]
+  viewport: Viewport
+  tabs: WorkspaceTab[]
+  activeTabId: string
+  projectId: string | null
+  commandPaletteOpen: boolean
+  panelFinderOpen: boolean
+  globalSearchOpen: boolean
+  settingsOpen: boolean
+  renameRequestId: string | null  // bumped when Canvas/App wants a panel to enter inline rename
+  stackDropTargetId: string | null  // panel id whose header is currently a drop target during a stack-drag
+  prefs: {
+    fontSize: number  // px, base UI font
+    density: 'compact' | 'cozy' | 'comfortable'
+    animations: boolean
+    snapStep: number  // px in world coords
+    showCursorReadout: boolean
+  }
+  minimapVisible: boolean
+  snapToGrid: boolean
+  outlinerOpen: boolean
+  helpOpen: boolean
+  statusBarVisible: boolean
+  chromeVisible: boolean
+  theme: Theme
+  past: HistorySnapshot[]
+  future: HistorySnapshot[]
+  jumpMode: JumpMode
+  reducedMotion: boolean
+  dragGuides: Array<{ axis: 'x' | 'y'; world: number }>
+  headerActivePanelId: string | null
+  bodyActivePanelId: string | null
+  // Last panel the user touched (selection OR body click). Sticky — survives selection clear.
+  // Sidebar follows this when nothing is selected, so context doesn't snap to nothing.
+  lastFocusedPanelId: string | null
+  sidebarOpen: boolean
+  sidebarSection: SidebarSection
+  presetGraveyards: PresetGraveyards
+  // Per-section pin: when set, that section ignores active-panel changes and stays on its pinned target.
+  sidebarPin: { explorer?: string; git?: string }
+  hiddenSidebarSections: SidebarSection[]
+
+  setHeaderActivePanel: (id: string | null) => void
+  setBodyActivePanel: (id: string | null) => void
+  setLastFocusedPanel: (id: string | null) => void
+  toggleSidebar: () => void
+  setSidebarSection: (s: SidebarSection) => void
+  setSidebarPin: (section: 'explorer' | 'git', path: string | undefined) => void
+  toggleSidebarSectionHidden: (s: SidebarSection) => void
+
+  addPanel: (panel: Panel) => void
+  updatePanel: (id: string, updates: Partial<Panel>, opts?: { skipHistory?: boolean }) => void
+  deletePanel: (id: string) => void
+  selectPanel: (id: string, additive?: boolean) => void
+  selectMultiple: (ids: string[]) => void
+  clearSelection: () => void
+  setViewport: (viewport: Partial<WorkspaceState['viewport']>) => void
+  setProject: (projectId: string | null) => void
+  toggleCommandPalette: () => void
+  togglePanelFinder: () => void
+  toggleGlobalSearch: () => void
+  toggleSettings: () => void
+  updatePrefs: (partial: Partial<WorkspaceState['prefs']>) => void
+  requestRename: (id: string | null) => void
+  setPanelFinderOpen: (open: boolean) => void
+  toggleMinimap: () => void
+  toggleSnapToGrid: () => void
+  toggleOutliner: () => void
+  toggleHelp: () => void
+  toggleStatusBar: () => void
+  toggleChrome: () => void
+  // Linked toggle for the top chrome + bottom status bar so Ctrl+\ hides/shows both together.
+  toggleBars: () => void
+  setBarsVisible: (visible: boolean) => void
+  // Distraction-free focus: hide chrome + status bar + minimap in one shot.
+  enterFocusMode: () => void
+  setTheme: (theme: Theme) => void
+  cycleTheme: () => void
+  createTab: (title?: string) => void
+  loadPreset: (name: 'life' | 'no-life') => void
+  switchTab: (id: string) => void
+  renameTab: (id: string, title: string) => void
+  closeTab: (id: string) => void
+  reorderTab: (fromId: string, toId: string) => void
+  initialize: () => void
+  getPanelsByType: (type: Panel['type']) => Panel[]
+  getPanelsInRegion: (regionId: string) => Panel[]
+  movePanel: (id: string, x: number, y: number) => void
+  resizePanel: (id: string, width: number, height: number) => void
+  // Annotations — sticky notes + text labels layered on the active tab's canvas.
+  addAnnotation: (a: Annotation) => void
+  updateAnnotation: (id: string, updates: Partial<Annotation>) => void
+  deleteAnnotation: (id: string) => void
+  groupIntoRegion: (panelIds: string[], regionName: string) => string
+  ungroupRegion: (regionId: string) => void
+  updateRegionMembership: (panelIds: string[]) => void
+  clampChildrenToRegion: (regionId: string) => void
+  // Docking — tab stacks.
+  stackPanels: (hostId: string, panelIds: string[]) => void
+  unstackPanel: (panelId: string) => void
+  setStackActive: (hostId: string, activeId: string) => void
+  setStackDropTarget: (id: string | null) => void
+  pushHistory: () => void
+  undo: () => void
+  redo: () => void
+  setJumpMode: (active: boolean, letters?: Record<string, string>) => void
+  setDragGuides: (guides: Array<{ axis: 'x' | 'y'; world: number }>) => void
+  movePanelToTab: (panelId: string, toTabId: string) => void
+  exportWorkspace: () => string
+  importWorkspace: (json: string) => boolean
+  markTabSaved: () => void
+}
+
+const createEmptyTab = (title = 'Canvas'): WorkspaceTab => ({
+  id: `tab-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+  title,
+  panels: {},
+  viewport: { x: 0, y: 0, zoom: 1 },
+  selectedPanelIds: [],
+  createdAt: Date.now()
+})
+
+const initialTab = createEmptyTab('Canvas 1')
+
+const syncActiveTab = (state: WorkspaceState, updates: Partial<Pick<WorkspaceTab, 'panels' | 'viewport' | 'selectedPanelIds'>>) => ({
+  tabs: state.tabs.map(tab => {
+    if (tab.id !== state.activeTabId) return tab
+    const next: WorkspaceTab = { ...tab, ...updates }
+    if ('panels' in updates) next.lastEditedAt = Date.now()
+    return next
+  })
+})
+
+const snapshot = (state: WorkspaceState): HistorySnapshot => ({
+  panels: state.panels,
+  selectedPanelIds: state.selectedPanelIds
+})
+
+export const useWorkspaceStore = create<WorkspaceState>()(
+  persist(
+    (set, get) => ({
+      panels: initialTab.panels,
+      selectedPanelIds: [],
+      viewport: initialTab.viewport,
+      tabs: [initialTab],
+      activeTabId: initialTab.id,
+      projectId: null,
+      commandPaletteOpen: false,
+      panelFinderOpen: false,
+      globalSearchOpen: false,
+      settingsOpen: false,
+      renameRequestId: null,
+      stackDropTargetId: null,
+      prefs: { fontSize: 13, density: 'cozy', animations: true, snapStep: 20, showCursorReadout: true },
+      minimapVisible: true,
+      snapToGrid: false,
+      outlinerOpen: false,
+      helpOpen: false,
+      statusBarVisible: true,
+      chromeVisible: true,
+      theme: 'dark',
+      past: [],
+      future: [],
+      jumpMode: { active: false, letters: {} },
+      reducedMotion: false,
+      dragGuides: [],
+      headerActivePanelId: null,
+      bodyActivePanelId: null,
+      lastFocusedPanelId: null,
+      sidebarOpen: false,
+      sidebarSection: 'explorer',
+      sidebarPin: {},
+      hiddenSidebarSections: [],
+      presetGraveyards: {},
+
+      setHeaderActivePanel: (id) => set({ headerActivePanelId: id }),
+      setBodyActivePanel: (id) => set(state => {
+        // Skip region: don't let region body activation hijack sidebar context.
+        const target = id ? state.panels[id] : null
+        const nextLastFocused = target?.type === 'region' ? state.lastFocusedPanelId : (id || state.lastFocusedPanelId)
+        return { bodyActivePanelId: id, lastFocusedPanelId: nextLastFocused }
+      }),
+      setLastFocusedPanel: (id) => set({ lastFocusedPanelId: id }),
+      toggleSidebar: () => set(state => ({ sidebarOpen: !state.sidebarOpen })),
+      setSidebarSection: (s) => set({ sidebarSection: s, sidebarOpen: true }),
+      setSidebarPin: (section, path) => set(state => ({ sidebarPin: { ...state.sidebarPin, [section]: path } })),
+      toggleSidebarSectionHidden: (s) => set(state => {
+        if (s === 'outline') return {}
+        const hidden = state.hiddenSidebarSections.includes(s)
+          ? state.hiddenSidebarSections.filter(x => x !== s)
+          : [...state.hiddenSidebarSections, s]
+        const ALL: SidebarSection[] = ['explorer', 'git', 'tokens', 'notes', 'outline']
+        const visible = ALL.filter(x => !hidden.includes(x))
+        const nextSection = hidden.includes(state.sidebarSection)
+          ? (visible[0] || state.sidebarSection)
+          : state.sidebarSection
+        return { hiddenSidebarSections: hidden, sidebarSection: nextSection }
+      }),
+
+      pushHistory: () => set((state) => ({
+        past: [...state.past.slice(-HISTORY_LIMIT + 1), snapshot(state)],
+        future: []
+      })),
+
+      undo: () => set((state) => {
+        if (state.past.length === 0) return state
+        const prev = state.past[state.past.length - 1]
+        const past = state.past.slice(0, -1)
+        const future = [snapshot(state), ...state.future].slice(0, HISTORY_LIMIT)
+        return {
+          past,
+          future,
+          panels: prev.panels,
+          selectedPanelIds: prev.selectedPanelIds,
+          ...syncActiveTab(state, { panels: prev.panels, selectedPanelIds: prev.selectedPanelIds })
+        }
+      }),
+
+      redo: () => set((state) => {
+        if (state.future.length === 0) return state
+        const next = state.future[0]
+        const future = state.future.slice(1)
+        const past = [...state.past, snapshot(state)].slice(-HISTORY_LIMIT)
+        return {
+          past,
+          future,
+          panels: next.panels,
+          selectedPanelIds: next.selectedPanelIds,
+          ...syncActiveTab(state, { panels: next.panels, selectedPanelIds: next.selectedPanelIds })
+        }
+      }),
+
+      addPanel: (panel) =>
+        set((state) => {
+          const now = Date.now()
+          const enriched: Panel = { createdAt: now, updatedAt: now, ...panel }
+          const panels = { ...state.panels, [panel.id]: enriched }
+          return {
+            past: [...state.past.slice(-HISTORY_LIMIT + 1), snapshot(state)],
+            future: [],
+            panels,
+            ...syncActiveTab(state, { panels })
+          }
+        }),
+
+      updatePanel: (id, updates, opts) =>
+        set((state) => {
+          if (!state.panels[id]) return state
+          const panels = {
+            ...state.panels,
+            [id]: { ...state.panels[id], ...updates, updatedAt: Date.now() }
+          }
+          const base = opts?.skipHistory ? {} : {
+            past: [...state.past.slice(-HISTORY_LIMIT + 1), snapshot(state)],
+            future: []
+          }
+          return { ...base, panels, ...syncActiveTab(state, { panels }) }
+        }),
+
+      deletePanel: (id) =>
+        set((state) => {
+          const target = state.panels[id]
+          // Real cleanup for terminals: kill the pty so we don't leak shell
+          // processes. We don't do this on every unmount (panels routinely
+          // re-mount during tab switches and pop-out/re-dock) — only here.
+          if (target?.type === 'terminal') {
+            try { window.electronAPI?.pty?.kill(id) } catch { /* ignore */ }
+          }
+          const newPanels = { ...state.panels }
+          delete newPanels[id]
+          // If deleted panel was a region, clear regionId on its (now-orphan) children.
+          if (target?.type === 'region' && target.children) {
+            target.children.forEach(cid => {
+              const c = newPanels[cid]
+              if (c) newPanels[cid] = { ...c, regionId: undefined }
+            })
+          }
+          // Detach from any parent region's children list.
+          Object.values(newPanels).forEach(panel => {
+            if (panel.children?.includes(id)) {
+              newPanels[panel.id] = {
+                ...panel,
+                children: panel.children.filter(childId => childId !== id)
+              }
+            }
+          })
+          const selectedPanelIds = state.selectedPanelIds.filter(pid => pid !== id)
+          const headerActivePanelId = state.headerActivePanelId === id ? null : state.headerActivePanelId
+          const bodyActivePanelId = state.bodyActivePanelId === id ? null : state.bodyActivePanelId
+          const lastFocusedPanelId = state.lastFocusedPanelId === id ? null : state.lastFocusedPanelId
+
+          // If the deleted panel belonged to a preset tab AND has a deterministic preset
+          // id, snapshot its current size/position to the graveyard so re-loading the
+          // preset can resurrect it exactly where it was.
+          let presetGraveyards = state.presetGraveyards
+          const activeTab = state.tabs.find(t => t.id === state.activeTabId)
+          if (target && activeTab?.kind?.startsWith('preset:') && id.startsWith('preset-')) {
+            const presetName = activeTab.kind.slice('preset:'.length)
+            const grave = { ...(presetGraveyards[presetName] || {}) }
+            grave[id] = {
+              x: target.x, y: target.y, width: target.width, height: target.height,
+              title: target.title, color: target.color, settings: target.settings,
+              description: target.description
+            }
+            presetGraveyards = { ...presetGraveyards, [presetName]: grave }
+          }
+
+          return {
+            past: [...state.past.slice(-HISTORY_LIMIT + 1), snapshot(state)],
+            future: [],
+            panels: newPanels,
+            selectedPanelIds,
+            headerActivePanelId,
+            bodyActivePanelId,
+            lastFocusedPanelId,
+            presetGraveyards,
+            ...syncActiveTab(state, { panels: newPanels, selectedPanelIds })
+          }
+        }),
+
+      selectPanel: (id, additive = false) =>
+        set((state) => {
+          let selectedPanelIds: string[]
+          if (additive) {
+            selectedPanelIds = state.selectedPanelIds.includes(id)
+              ? state.selectedPanelIds.filter(pid => pid !== id)
+              : [...state.selectedPanelIds, id]
+          } else {
+            selectedPanelIds = [id]
+          }
+          // Switching selection away from a header-active panel clears that flag.
+          const headerActivePanelId = state.headerActivePanelId && state.headerActivePanelId !== id ? null : state.headerActivePanelId
+          const bodyActivePanelId = state.bodyActivePanelId && state.bodyActivePanelId !== id ? null : state.bodyActivePanelId
+          // Don't reassign lastFocusedPanelId to a region — sidebar context (explorer/git)
+          // should keep following the previously focused real panel.
+          const target = state.panels[id]
+          const nextLastFocused = target?.type === 'region' ? state.lastFocusedPanelId : id
+          return { selectedPanelIds, headerActivePanelId, bodyActivePanelId, lastFocusedPanelId: nextLastFocused, ...syncActiveTab(state, { selectedPanelIds }) }
+        }),
+
+      selectMultiple: (ids) => set((state) => ({ selectedPanelIds: ids, headerActivePanelId: null, bodyActivePanelId: null, ...syncActiveTab(state, { selectedPanelIds: ids }) })),
+
+      clearSelection: () => set((state) => ({ selectedPanelIds: [], headerActivePanelId: null, bodyActivePanelId: null, ...syncActiveTab(state, { selectedPanelIds: [] }) })),
+
+      setViewport: (viewport) =>
+        set((state) => {
+          const nextViewport = { ...state.viewport, ...viewport }
+          return { viewport: nextViewport, ...syncActiveTab(state, { viewport: nextViewport }) }
+        }),
+
+      setProject: (projectId) => set({ projectId }),
+
+      toggleCommandPalette: () => set((state) => ({ commandPaletteOpen: !state.commandPaletteOpen })),
+      togglePanelFinder: () => set((state) => ({ panelFinderOpen: !state.panelFinderOpen })),
+      toggleGlobalSearch: () => set((state) => ({ globalSearchOpen: !state.globalSearchOpen })),
+      toggleSettings: () => set((state) => ({ settingsOpen: !state.settingsOpen })),
+      updatePrefs: (partial) => set((state) => ({ prefs: { ...state.prefs, ...partial } })),
+      requestRename: (id) => set({ renameRequestId: id }),
+      setPanelFinderOpen: (open) => set({ panelFinderOpen: open }),
+      toggleMinimap: () => set((state) => ({ minimapVisible: !state.minimapVisible })),
+      toggleSnapToGrid: () => set((state) => ({ snapToGrid: !state.snapToGrid })),
+      toggleOutliner: () => set((state) => ({ outlinerOpen: !state.outlinerOpen })),
+      toggleHelp: () => set((state) => ({ helpOpen: !state.helpOpen })),
+      toggleStatusBar: () => set((state) => ({ statusBarVisible: !state.statusBarVisible })),
+      toggleChrome: () => set((state) => ({ chromeVisible: !state.chromeVisible })),
+      toggleBars: () => set((state) => {
+        // If either is showing, hide both. If both hidden, show both. Keeps them in lockstep.
+        const next = !(state.chromeVisible || state.statusBarVisible)
+        return { chromeVisible: next, statusBarVisible: next }
+      }),
+      setBarsVisible: (visible) => set({ chromeVisible: visible, statusBarVisible: visible }),
+      enterFocusMode: () => set({ chromeVisible: false, statusBarVisible: false, minimapVisible: false }),
+      setTheme: (theme) => set({ theme }),
+      cycleTheme: () => set((state) => {
+        const order: Theme[] = ['dark', 'midnight', 'light', 'system']
+        const next = order[(order.indexOf(state.theme) + 1) % order.length]
+        return { theme: next }
+      }),
+
+      createTab: (title) =>
+        set((state) => {
+          // Pick the lowest unused number so closing Canvas 1 then creating new doesn't
+          // produce "Canvas 3" when Canvas 3 already exists. Walk 1..N+1 for first gap.
+          let auto = title
+          if (!auto) {
+            const used = new Set<number>()
+            state.tabs.forEach(t => {
+              const m = t.title.match(/^Canvas (\d+)$/)
+              if (m) used.add(parseInt(m[1], 10))
+            })
+            let n = 1
+            while (used.has(n)) n++
+            auto = `Canvas ${n}`
+          }
+          const tab = createEmptyTab(auto)
+          return {
+            tabs: [...state.tabs, tab],
+            activeTabId: tab.id,
+            panels: tab.panels,
+            selectedPanelIds: tab.selectedPanelIds,
+            viewport: tab.viewport,
+            past: [],
+            future: [],
+            jumpMode: state.jumpMode.active ? { active: false, letters: {} } : state.jumpMode
+          }
+        }),
+
+      // Reuse-or-create-or-resurrect a preset tab.
+      //   - Existing preset tab (matched by kind): switch to it AND restore any missing
+      //     preset panels from the graveyard (or defaults if never customised).
+      //   - No existing tab: build from preset spec, applying graveyard overrides so the
+      //     user's last-known positions/sizes/settings are preserved across full close
+      //     + reopen.
+      loadPreset: (name) => {
+        import('../presets').then(({ buildPresetPanels, presetTabMeta, presetPanelId }) => {
+          const meta = presetTabMeta(name)
+          const cur = get()
+          const kind = `preset:${name}` as 'preset:life' | 'preset:no-life'
+          const existing = cur.tabs.find(t => t.kind === kind) || cur.tabs.find(t => t.title === meta.title)
+          const graveyard = cur.presetGraveyards[name] || {}
+
+          // Build the canonical preset panel set with graveyard overrides applied.
+          const specPanels = buildPresetPanels(name, graveyard)
+
+          if (existing) {
+            // If this is an old preset tab created before deterministic ids were
+            // introduced, migrate its panels by matching titles → spec ids. Keeps the
+            // user's customised positions/sizes/settings but rekeys so future merges
+            // work and graveyard tracking kicks in.
+            let workingPanels = existing.panels
+            if (!existing.kind) {
+              const byTitle = new Map<string, Panel>()
+              Object.values(existing.panels).forEach(p => byTitle.set(p.title.toLowerCase(), p))
+              const migrated: Record<string, Panel> = {}
+              specPanels.forEach(sp => {
+                const matched = byTitle.get(sp.title.toLowerCase())
+                if (matched) {
+                  // Preserve user x/y/w/h and settings; adopt deterministic id.
+                  migrated[sp.id] = { ...matched, id: sp.id }
+                  byTitle.delete(sp.title.toLowerCase())
+                } else {
+                  migrated[sp.id] = sp
+                }
+              })
+              // Any leftover panels (user-added customs) keep their original ids.
+              byTitle.forEach(p => { migrated[p.id] = p })
+              workingPanels = migrated
+            }
+
+            // Resurrect any spec panel still missing.
+            const updatedPanels = { ...workingPanels }
+            specPanels.forEach(sp => {
+              if (!updatedPanels[sp.id]) updatedPanels[sp.id] = sp
+              else {
+                updatedPanels[sp.id] = {
+                  ...updatedPanels[sp.id],
+                  settings: {
+                    ...(updatedPanels[sp.id].settings || {}),
+                    ...(sp.type === 'browser' ? {
+                      browserTabs: sp.settings?.browserTabs,
+                      browserActiveTabId: sp.settings?.browserActiveTabId
+                    } : {}),
+                    lazyLoad: sp.settings?.lazyLoad === true
+                  }
+                }
+              }
+            })
+            // Clear graveyard entries for the resurrected ones so future deletes write
+            // fresh snapshots.
+            const newGraveyard = { ...graveyard }
+            specPanels.forEach(sp => { if (newGraveyard[sp.id]) delete newGraveyard[sp.id] })
+
+            const updatedTabs = cur.tabs.map(t =>
+              t.id === existing.id ? { ...t, panels: updatedPanels, kind } : t
+            )
+            const isActive = cur.activeTabId === existing.id
+            set({
+              tabs: updatedTabs,
+              activeTabId: existing.id,
+              panels: updatedPanels,
+              selectedPanelIds: isActive ? cur.selectedPanelIds : [],
+              viewport: existing.viewport,
+              past: [],
+              future: [],
+              presetGraveyards: { ...cur.presetGraveyards, [name]: newGraveyard }
+            })
+            return
+          }
+
+          // Fresh tab — build from spec + graveyard overrides.
+          const panelMap: Record<string, Panel> = {}
+          specPanels.forEach(p => { panelMap[p.id] = p })
+          // Mark this id so even renames don't break the kind link.
+          void presetPanelId
+          const tab: WorkspaceTab = {
+            id: `tab-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            title: meta.title,
+            color: meta.color,
+            panels: panelMap,
+            viewport: { x: 0, y: 0, zoom: 1 },
+            selectedPanelIds: [],
+            createdAt: Date.now(),
+            kind
+          }
+          set(state => ({
+            tabs: [...state.tabs, tab],
+            activeTabId: tab.id,
+            panels: tab.panels,
+            selectedPanelIds: [],
+            viewport: tab.viewport,
+            past: [],
+            future: []
+          }))
+        })
+      },
+
+      switchTab: (id) =>
+        set((state) => {
+          const tab = state.tabs.find(item => item.id === id)
+          if (!tab) return state
+          // Clear focus pointers that refer to panels in the previous tab to avoid
+          // stale sidebar context / blue rings after switching.
+          const stillExists = (pid: string | null) => !!(pid && tab.panels[pid])
+          return {
+            activeTabId: tab.id,
+            panels: tab.panels,
+            selectedPanelIds: tab.selectedPanelIds,
+            viewport: tab.viewport,
+            past: [],
+            future: [],
+            headerActivePanelId: stillExists(state.headerActivePanelId) ? state.headerActivePanelId : null,
+            bodyActivePanelId: stillExists(state.bodyActivePanelId) ? state.bodyActivePanelId : null,
+            lastFocusedPanelId: stillExists(state.lastFocusedPanelId) ? state.lastFocusedPanelId : null,
+            jumpMode: state.jumpMode.active ? { active: false, letters: {} } : state.jumpMode
+          }
+        }),
+
+      renameTab: (id, title) =>
+        set((state) => ({
+          tabs: state.tabs.map(tab => {
+            if (tab.id !== id) return tab
+            const nextTitle = title.trim() || tab.title
+            if (nextTitle === tab.title) return tab
+            return { ...tab, title: nextTitle, lastEditedAt: Date.now() }
+          })
+        })),
+
+      reorderTab: (fromId, toId) =>
+        set((state) => {
+          if (fromId === toId) return state
+          const fromIdx = state.tabs.findIndex(t => t.id === fromId)
+          const toIdx = state.tabs.findIndex(t => t.id === toId)
+          if (fromIdx < 0 || toIdx < 0) return state
+          const tabs = [...state.tabs]
+          const [moved] = tabs.splice(fromIdx, 1)
+          tabs.splice(toIdx, 0, moved)
+          return { tabs }
+        }),
+
+      closeTab: (id) =>
+        set((state) => {
+          if (state.tabs.length <= 1) return state
+          const closingTab = state.tabs.find(t => t.id === id)
+          const tabs = state.tabs.filter(tab => tab.id !== id)
+          const activeTab = id === state.activeTabId ? tabs[0] : tabs.find(tab => tab.id === state.activeTabId) || tabs[0]
+
+          // Closing a preset tab: snapshot ALL of its panels to the graveyard so
+          // re-loading the preset can resurrect them at their last-known state.
+          let presetGraveyards = state.presetGraveyards
+          if (closingTab?.kind?.startsWith('preset:')) {
+            const presetName = closingTab.kind.slice('preset:'.length)
+            const grave = { ...(presetGraveyards[presetName] || {}) }
+            Object.values(closingTab.panels).forEach(p => {
+              if (p.id.startsWith('preset-')) {
+                grave[p.id] = {
+                  x: p.x, y: p.y, width: p.width, height: p.height,
+                  title: p.title, color: p.color, settings: p.settings, description: p.description
+                }
+              }
+            })
+            presetGraveyards = { ...presetGraveyards, [presetName]: grave }
+          }
+
+          // Clear any focus refs pointing at panels we just dropped.
+          const stillExists = (pid: string | null) => !!(pid && activeTab.panels[pid])
+          return {
+            tabs,
+            activeTabId: activeTab.id,
+            panels: activeTab.panels,
+            selectedPanelIds: activeTab.selectedPanelIds,
+            viewport: activeTab.viewport,
+            jumpMode: state.jumpMode.active ? { active: false, letters: {} } : state.jumpMode,
+            headerActivePanelId: stillExists(state.headerActivePanelId) ? state.headerActivePanelId : null,
+            bodyActivePanelId: stillExists(state.bodyActivePanelId) ? state.bodyActivePanelId : null,
+            lastFocusedPanelId: stillExists(state.lastFocusedPanelId) ? state.lastFocusedPanelId : null,
+            presetGraveyards
+          }
+        }),
+
+      initialize: () => {
+        // Cross-window state sync: when another window (pop-out or main) writes
+        // to localStorage, pick up the panel/tab updates so we don't render
+        // stale state. We deliberately skip local UI fields (selection,
+        // viewport, jumpMode, etc.) so each window keeps its own UI state.
+        const onStorage = (e: StorageEvent) => {
+          if (e.key !== 'worktree-studio-workspace' || !e.newValue) return
+          try {
+            const parsed = JSON.parse(e.newValue)
+            const data = parsed?.state || parsed
+            if (!data) return
+            useWorkspaceStore.setState((state) => ({
+              panels: data.panels ?? state.panels,
+              tabs: data.tabs ?? state.tabs,
+              activeTabId: data.activeTabId ?? state.activeTabId
+            }))
+          } catch { /* ignore parse error */ }
+        }
+        // Avoid double-bind if initialize() is called twice.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const w = window as any
+        if (!w.__wts_storage_bound) {
+          window.addEventListener('storage', onStorage)
+          w.__wts_storage_bound = true
+        }
+        console.log('Workspace initialized')
+      },
+
+      getPanelsByType: (type) => Object.values(get().panels).filter(p => p.type === type),
+      getPanelsInRegion: (regionId) => Object.values(get().panels).filter(p => p.regionId === regionId),
+
+      movePanel: (id, x, y) =>
+        set((state) => {
+          if (!state.panels[id] || state.panels[id].locked) return state
+          const nx = state.snapToGrid ? Math.round(x / 20) * 20 : x
+          const ny = state.snapToGrid ? Math.round(y / 20) * 20 : y
+          const panel = state.panels[id]
+          const dx = nx - panel.x
+          const dy = ny - panel.y
+          const panels = { ...state.panels, [id]: { ...panel, x: nx, y: ny } }
+          if (panel.type === 'region' && panel.children) {
+            panel.children.forEach(childId => {
+              const child = panels[childId]
+              if (child && !child.locked) {
+                panels[childId] = { ...child, x: child.x + dx, y: child.y + dy }
+              }
+            })
+          }
+          return { panels, ...syncActiveTab(state, { panels }) }
+        }),
+
+      resizePanel: (id, width, height) =>
+        set((state) => {
+          if (!state.panels[id] || state.panels[id].locked) return state
+          const panels = {
+            ...state.panels,
+            [id]: { ...state.panels[id], width, height }
+          }
+          return { panels, ...syncActiveTab(state, { panels }) }
+        }),
+
+      addAnnotation: (a) => set((state) => ({
+        tabs: state.tabs.map(t =>
+          t.id === state.activeTabId
+            ? { ...t, annotations: [...(t.annotations || []), a], lastEditedAt: Date.now() }
+            : t
+        )
+      })),
+      updateAnnotation: (id, updates) => set((state) => ({
+        tabs: state.tabs.map(t =>
+          t.id === state.activeTabId
+            ? { ...t, annotations: (t.annotations || []).map(a => a.id === id ? { ...a, ...updates } : a), lastEditedAt: Date.now() }
+            : t
+        )
+      })),
+      deleteAnnotation: (id) => set((state) => ({
+        tabs: state.tabs.map(t =>
+          t.id === state.activeTabId
+            ? { ...t, annotations: (t.annotations || []).filter(a => a.id !== id), lastEditedAt: Date.now() }
+            : t
+        )
+      })),
+
+      groupIntoRegion: (panelIds, regionName) => {
+        const state = get()
+        if (panelIds.length === 0) return ''
+        const panels = panelIds.map(id => state.panels[id]).filter(Boolean)
+        if (panels.length === 0) return ''
+        const minX = Math.min(...panels.map(p => p.x))
+        const minY = Math.min(...panels.map(p => p.y))
+        const maxX = Math.max(...panels.map(p => p.x + p.width))
+        const maxY = Math.max(...panels.map(p => p.y + p.height))
+        const width = maxX - minX + 40
+        const height = maxY - minY + 40
+
+        const regionId = `region-${Date.now()}`
+        const regionPanel: Panel = {
+          id: regionId,
+          type: 'region',
+          x: minX - 20,
+          y: minY - 20,
+          width,
+          height,
+          title: regionName,
+          children: panelIds,
+          settings: { collapsed: false },
+          createdAt: Date.now()
+        }
+
+        const updatedPanels = { ...state.panels }
+        panelIds.forEach(id => {
+          updatedPanels[id] = { ...updatedPanels[id], regionId }
+        })
+        updatedPanels[regionId] = regionPanel
+
+        set((current) => ({
+          past: [...current.past.slice(-HISTORY_LIMIT + 1), snapshot(current)],
+          future: [],
+          panels: updatedPanels,
+          selectedPanelIds: [regionId],
+          ...syncActiveTab(current, { panels: updatedPanels, selectedPanelIds: [regionId] })
+        }))
+        return regionId
+      },
+
+      updateRegionMembership: (panelIds) => set(state => {
+        const panels = { ...state.panels }
+        const regions = Object.values(panels).filter(p => p.type === 'region')
+        const childAdds = new Map<string, Set<string>>()  // regionId → child ids added
+        const childRemoves = new Map<string, Set<string>>()  // regionId → child ids removed
+        let changed = false
+
+        const add = (m: Map<string, Set<string>>, k: string, v: string) => {
+          if (!m.has(k)) m.set(k, new Set())
+          m.get(k)!.add(v)
+        }
+
+        panelIds.forEach(id => {
+          const p = panels[id]
+          if (!p || p.type === 'region') return
+          const cur = p.regionId
+          // Fully-inside test against all regions. If multiple, pick smallest (most specific).
+          const candidates = regions.filter(r =>
+            p.x >= r.x && p.y >= r.y &&
+            p.x + p.width <= r.x + r.width &&
+            p.y + p.height <= r.y + r.height
+          )
+          candidates.sort((a, b) => (a.width * a.height) - (b.width * b.height))
+          const target = candidates[0]
+
+          if (target && cur !== target.id) {
+            panels[id] = { ...p, regionId: target.id }
+            if (cur) add(childRemoves, cur, id)
+            add(childAdds, target.id, id)
+            changed = true
+          } else if (!target && cur) {
+            const r = panels[cur]
+            const fullyOutside = !r || (
+              p.x + p.width <= r.x || p.x >= r.x + r.width ||
+              p.y + p.height <= r.y || p.y >= r.y + r.height
+            )
+            if (fullyOutside) {
+              panels[id] = { ...p, regionId: undefined }
+              add(childRemoves, cur, id)
+              changed = true
+            }
+          }
+        })
+
+        if (!changed) return state
+
+        // Mirror regionId changes into region.children arrays.
+        const touchedRegionIds = new Set<string>([...childAdds.keys(), ...childRemoves.keys()])
+        touchedRegionIds.forEach(rid => {
+          const r = panels[rid]
+          if (!r || r.type !== 'region') return
+          const cur = new Set(r.children || [])
+          const removes = childRemoves.get(rid)
+          const adds = childAdds.get(rid)
+          if (removes) removes.forEach(c => cur.delete(c))
+          if (adds) adds.forEach(c => cur.add(c))
+          panels[rid] = { ...r, children: Array.from(cur) }
+        })
+
+        return { panels, ...syncActiveTab(state, { panels }) }
+      }),
+
+      stackPanels: (hostId, panelIds) => set(state => {
+        const host = state.panels[hostId]
+        if (!host || host.type === 'region') return state
+        const toMerge = panelIds.filter(id => id !== hostId && state.panels[id] && state.panels[id].type !== 'region')
+        if (toMerge.length === 0) return state
+        const panels = { ...state.panels }
+        // Promote host with merged children. Defensive against double-stack:
+        // if a child is already host of its own stack, fold its children up.
+        const childrenAcc: string[] = [...(host.stackChildren || [])]
+        toMerge.forEach(cid => {
+          const c = panels[cid]
+          if (!c) return
+          if (c.stackChildren && c.stackChildren.length > 0) {
+            // Promote grand-children directly under new host.
+            c.stackChildren.forEach(gc => {
+              const g = panels[gc]
+              if (!g) return
+              if (!childrenAcc.includes(gc) && gc !== hostId) childrenAcc.push(gc)
+              panels[gc] = {
+                ...g,
+                stackParentId: hostId,
+                // Preserve pre-stack bbox if not already recorded.
+                preStackBbox: g.preStackBbox ?? { x: g.x, y: g.y, width: g.width, height: g.height }
+              }
+            })
+          }
+          if (!childrenAcc.includes(cid)) childrenAcc.push(cid)
+          panels[cid] = {
+            ...c,
+            stackParentId: hostId,
+            stackChildren: undefined,
+            stackActive: undefined,
+            // Snapshot the original size so unstack/pop-out can restore it.
+            preStackBbox: c.preStackBbox ?? { x: c.x, y: c.y, width: c.width, height: c.height }
+          }
+        })
+        panels[hostId] = { ...host, stackChildren: childrenAcc, stackActive: host.stackActive || hostId }
+        return {
+          past: [...state.past.slice(-HISTORY_LIMIT + 1), snapshot(state)],
+          future: [],
+          panels,
+          selectedPanelIds: [hostId],
+          ...syncActiveTab(state, { panels, selectedPanelIds: [hostId] })
+        }
+      }),
+
+      unstackPanel: (panelId) => set(state => {
+        const p = state.panels[panelId]
+        if (!p) return state
+        const panels = { ...state.panels }
+        let hostId: string | undefined
+        if (p.stackParentId) hostId = p.stackParentId
+        else if (p.stackChildren && p.stackChildren.length > 0) {
+          // Unstacking the host itself: promote first child to new host.
+          const newHostId = p.stackChildren[0]
+          const remainingChildren = p.stackChildren.slice(1)
+          const newHost = panels[newHostId]
+          if (newHost) {
+            panels[newHostId] = {
+              ...newHost,
+              x: p.x, y: p.y, width: p.width, height: p.height,
+              stackParentId: undefined,
+              stackChildren: remainingChildren.length ? remainingChildren : undefined,
+              stackActive: remainingChildren.length ? newHostId : undefined
+            }
+            remainingChildren.forEach(cid => {
+              if (panels[cid]) panels[cid] = { ...panels[cid], stackParentId: newHostId }
+            })
+          }
+          // Old host becomes standalone, offset so it doesn't perfectly overlap.
+          panels[panelId] = {
+            ...p,
+            x: p.x + 40, y: p.y + 40,
+            stackChildren: undefined,
+            stackActive: undefined
+          }
+          return {
+            past: [...state.past.slice(-HISTORY_LIMIT + 1), snapshot(state)],
+            future: [],
+            panels,
+            ...syncActiveTab(state, { panels })
+          }
+        }
+        if (!hostId) return state
+        const host = panels[hostId]
+        if (!host || !host.stackChildren) return state
+        const remaining = host.stackChildren.filter(id => id !== panelId)
+        panels[hostId] = {
+          ...host,
+          stackChildren: remaining.length ? remaining : undefined,
+          stackActive: host.stackActive === panelId ? hostId : host.stackActive
+        }
+        // Restore the panel's pre-stack dimensions. Position next to host.
+        const restore = p.preStackBbox
+        panels[panelId] = {
+          ...p,
+          x: host.x + host.width + 24,
+          y: host.y,
+          width: restore?.width ?? host.width,
+          height: restore?.height ?? host.height,
+          stackParentId: undefined,
+          stackChildren: undefined,
+          stackActive: undefined,
+          preStackBbox: undefined
+        }
+        return {
+          past: [...state.past.slice(-HISTORY_LIMIT + 1), snapshot(state)],
+          future: [],
+          panels,
+          ...syncActiveTab(state, { panels })
+        }
+      }),
+
+      setStackDropTarget: (id) => set({ stackDropTargetId: id }),
+
+      setStackActive: (hostId, activeId) => set(state => {
+        const host = state.panels[hostId]
+        if (!host || !host.stackChildren) return state
+        if (activeId !== hostId && !host.stackChildren.includes(activeId)) return state
+        const panels = { ...state.panels, [hostId]: { ...host, stackActive: activeId } }
+        return { panels, ...syncActiveTab(state, { panels }) }
+      }),
+
+      clampChildrenToRegion: (regionId) => set(state => {
+        const region = state.panels[regionId]
+        if (!region || region.type !== 'region') return state
+        const panels = { ...state.panels }
+        let changed = false
+        Object.values(state.panels).forEach(p => {
+          if (p.regionId !== regionId) return
+          let nx = p.x, ny = p.y
+          const maxX = region.x + region.width - p.width
+          const maxY = region.y + region.height - p.height
+          if (nx < region.x) nx = region.x
+          if (ny < region.y) ny = region.y
+          if (nx > maxX) nx = Math.max(region.x, maxX)
+          if (ny > maxY) ny = Math.max(region.y, maxY)
+          if (nx !== p.x || ny !== p.y) {
+            panels[p.id] = { ...p, x: nx, y: ny }
+            changed = true
+          }
+        })
+        if (!changed) return state
+        return { panels, ...syncActiveTab(state, { panels }) }
+      }),
+
+      setJumpMode: (active, letters) => set({ jumpMode: { active, letters: letters || {} } }),
+
+      setDragGuides: (guides) => set({ dragGuides: guides }),
+
+      markTabSaved: () => set(state => ({
+        tabs: state.tabs.map(tab => tab.id === state.activeTabId ? { ...tab, lastSavedAt: Date.now() } : tab)
+      })),
+
+      movePanelToTab: (panelId, toTabId) => set(state => {
+        if (toTabId === state.activeTabId) return state
+        const panel = state.panels[panelId]
+        if (!panel) return state
+        const fromPanels = { ...state.panels }
+        delete fromPanels[panelId]
+        // Cascade: if region, take children with it.
+        const moved: Record<string, Panel> = { [panelId]: panel }
+        if (panel.type === 'region' && panel.children) {
+          panel.children.forEach(cid => {
+            const c = state.panels[cid]
+            if (c) {
+              moved[cid] = c
+              delete fromPanels[cid]
+            }
+          })
+        }
+        const tabs = state.tabs.map(tab => {
+          if (tab.id === state.activeTabId) {
+            return { ...tab, panels: fromPanels, selectedPanelIds: tab.selectedPanelIds.filter(id => !(id in moved)), lastEditedAt: Date.now() }
+          }
+          if (tab.id === toTabId) {
+            return { ...tab, panels: { ...tab.panels, ...moved }, lastEditedAt: Date.now() }
+          }
+          return tab
+        })
+        return {
+          tabs,
+          panels: fromPanels,
+          selectedPanelIds: state.selectedPanelIds.filter(id => !(id in moved))
+        }
+      }),
+
+      exportWorkspace: () => {
+        const state = get()
+        return JSON.stringify({
+          version: 1,
+          exportedAt: Date.now(),
+          tabs: state.tabs,
+          activeTabId: state.activeTabId,
+          theme: state.theme
+        }, null, 2)
+      },
+
+      importWorkspace: (json) => {
+        try {
+          const data = JSON.parse(json)
+          if (!data.tabs || !Array.isArray(data.tabs) || data.tabs.length === 0) return false
+          // Validate each tab has minimum required shape.
+          const validTabs: WorkspaceTab[] = data.tabs.filter((t: unknown): t is WorkspaceTab => {
+            const cand = t as Partial<WorkspaceTab> | null
+            return !!cand && typeof cand.id === 'string' && typeof cand.title === 'string' &&
+              cand.panels !== undefined && cand.viewport !== undefined
+          })
+          if (validTabs.length === 0) return false
+          // Fall back to first tab if activeTabId points nowhere.
+          const activeTabId = validTabs.find(t => t.id === data.activeTabId)?.id || validTabs[0].id
+          const active = validTabs.find(t => t.id === activeTabId)!
+          set(state => ({
+            tabs: validTabs,
+            activeTabId,
+            panels: active.panels || {},
+            selectedPanelIds: [],
+            viewport: active.viewport || { x: 0, y: 0, zoom: 1 },
+            theme: ['dark', 'midnight', 'light', 'system'].includes(data.theme) ? data.theme : state.theme,
+            past: [],
+            future: []
+          }))
+          return true
+        } catch {
+          return false
+        }
+      },
+
+      ungroupRegion: (regionId) => {
+        const state = get()
+        const region = state.panels[regionId]
+        if (!region || region.type !== 'region') return
+        const updatedPanels = { ...state.panels }
+        const childIds = region.children || []
+        childIds.forEach(id => {
+          if (updatedPanels[id]) {
+            updatedPanels[id] = { ...updatedPanels[id], regionId: undefined }
+          }
+        })
+        delete updatedPanels[regionId]
+        set((current) => ({
+          past: [...current.past.slice(-HISTORY_LIMIT + 1), snapshot(current)],
+          future: [],
+          panels: updatedPanels,
+          selectedPanelIds: childIds.filter(id => updatedPanels[id]),
+          ...syncActiveTab(current, { panels: updatedPanels, selectedPanelIds: childIds.filter(id => updatedPanels[id]) })
+        }))
+      }
+    }),
+    {
+      name: 'worktree-studio-workspace',
+      version: 3,
+      partialize: (state) => ({
+        panels: state.panels,
+        viewport: state.viewport,
+        tabs: state.tabs,
+        activeTabId: state.activeTabId,
+        projectId: state.projectId,
+        minimapVisible: state.minimapVisible,
+        snapToGrid: state.snapToGrid,
+        outlinerOpen: state.outlinerOpen,
+        statusBarVisible: state.statusBarVisible,
+        chromeVisible: state.chromeVisible,
+        theme: state.theme,
+        sidebarOpen: state.sidebarOpen,
+        sidebarSection: state.sidebarSection,
+        sidebarPin: state.sidebarPin,
+        hiddenSidebarSections: state.hiddenSidebarSections,
+        prefs: state.prefs,
+        presetGraveyards: state.presetGraveyards
+      }),
+      // v2: scrub retired gold/amber colors. v3: force snapToGrid off — was the source
+      // of the end-of-drag jerk. Users who actually want it can toggle the Snap chip.
+      migrate: (persisted: unknown) => {
+        const RETIRED = new Set(['#d4a017', '#ffd36a', '#ffc517', '#ffbd2e'])
+        const scrub = (c?: string) => (c && RETIRED.has(c.toLowerCase()) ? '' : c)
+        const data = persisted as { panels?: Record<string, Panel>; tabs?: WorkspaceTab[]; snapToGrid?: boolean }
+        if (data?.panels) {
+          Object.values(data.panels).forEach(p => { if (p.color) p.color = scrub(p.color) })
+        }
+        if (data?.tabs) {
+          data.tabs.forEach(t => {
+            if (t.color) t.color = scrub(t.color)
+            if (t.panels) Object.values(t.panels).forEach(p => { if (p.color) p.color = scrub(p.color) })
+          })
+        }
+        if (data) data.snapToGrid = false
+        return data as WorkspaceState
+      }
+    }
+  )
+)
