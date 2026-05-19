@@ -288,6 +288,7 @@ const MonacoFallback: React.FC<{ panel: PanelType }> = ({ panel }) => {
   const [fontSize] = useState<number>(settings.fontSize || 14)
   const [wordWrap, setWordWrap] = useState<'on' | 'off'>(settings.wordWrap || 'off')
   const [statusMsg, setStatusMsg] = useState<string>('')
+  const flashTimerRef = useRef<number>(0)
   const editorRef = useRef<monacoNS.editor.IStandaloneCodeEditor | null>(null)
   const lastSavedRef = useRef<string>(settings.content ?? '')
 
@@ -313,7 +314,13 @@ const MonacoFallback: React.FC<{ panel: PanelType }> = ({ panel }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [panel.id])
 
-  const flash = (m: string) => { setStatusMsg(m); window.setTimeout(() => setStatusMsg(s => s === m ? '' : s), 1800) }
+  useEffect(() => () => { window.clearTimeout(flashTimerRef.current) }, [])
+
+  const flash = (m: string) => {
+    window.clearTimeout(flashTimerRef.current)
+    setStatusMsg(m)
+    flashTimerRef.current = window.setTimeout(() => setStatusMsg(s => s === m ? '' : s), 1800)
+  }
 
   const doSave = useCallback(async (saveAs = false) => {
     const api = window.electronAPI?.file

@@ -125,6 +125,9 @@ const Panel: React.FC<PanelProps> = ({ panel, isSelected, offscreen, embedded, o
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; targetPanel?: PanelType } | null>(null)
   const initialPositions = useRef<Map<string, { x: number; y: number }>>(new Map())
   const dragMoved = useRef(false)
+  // Cached header elements for stack-merge hit testing during drag.
+  // Populated once at drag start, cleared on mouseup — avoids querySelectorAll at 60fps.
+  const cachedHeaders = useRef<Array<{ el: HTMLElement; pid: string; rect: DOMRect }> | null>(null)
   // When user clicks (no shift) on a panel that's already part of a multi-selection,
   // defer collapsing selection to single until mouseup — gives them a chance to drag
   // the whole group from this panel first. If they only click (no drag), collapse.
@@ -269,6 +272,19 @@ const Panel: React.FC<PanelProps> = ({ panel, isSelected, offscreen, embedded, o
       if (p) positions.set(id, { x: p.x, y: p.y })
     })
     initialPositions.current = positions
+
+    // Cache all panel headers once here so the drag rAF loop doesn't querySelectorAll every frame.
+    if (panel.type !== 'region') {
+      const headerEls = document.querySelectorAll<HTMLElement>('.panel > .panel-header')
+      cachedHeaders.current = []
+      headerEls.forEach(h => {
+        const parent = h.parentElement as HTMLElement | null
+        if (!parent || parent === panelRef.current) return
+        const pid = parent.getAttribute('data-panel-id')
+        if (!pid || pid === panel.id) return
+        cachedHeaders.current!.push({ el: h, pid, rect: h.getBoundingClientRect() })
+      })
+    }
   }, [panel.id, panel.type, panel.locked, panel.pinFront, panel.pinBack, panel.zIndex, onSelect, renaming, updatePanel, jumpModeActive])
 
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
@@ -477,20 +493,13 @@ const Panel: React.FC<PanelProps> = ({ panel, isSelected, offscreen, embedded, o
           setPanelTransform(panel.id, liveX - anchorSingle.x, liveY - anchorSingle.y)
           const finalX = liveX, finalY = liveY
 
-          // Drag-onto-header → stack merge detection. Walk all visible panel
-          // headers (skipping self) and check if the cursor is inside one. The
-          // first hit becomes the drop target; visual highlight applied via the
-          // panels' .stack-drop-target class. Skip for regions.
+          // Drag-onto-header → stack merge detection. Use headers cached at drag start
+          // (avoids querySelectorAll at 60fps). Skip for regions.
           if (panel.type !== 'region') {
-            const headers = document.querySelectorAll<HTMLElement>('.panel > .panel-header')
+            const headers = cachedHeaders.current || []
             let hit: string | null = null
             for (let i = 0; i < headers.length; i++) {
-              const h = headers[i]
-              const parent = h.parentElement as HTMLElement | null
-              if (!parent || parent === panelRef.current) continue
-              const pid = parent.getAttribute('data-panel-id')
-              if (!pid || pid === panel.id) continue
-              const r = h.getBoundingClientRect()
+              const { pid, rect: r } = headers[i]
               if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) {
                 // Also skip if target panel is itself stacked into someone else
                 // (we only merge into top-level hosts to keep tree flat).
@@ -619,6 +628,7 @@ const Panel: React.FC<PanelProps> = ({ panel, isSelected, offscreen, embedded, o
       setIsDragging(false)
       setIsResizing(null)
       initialPositions.current.clear()
+      cachedHeaders.current = null
       setDragGuides([])
     }
 

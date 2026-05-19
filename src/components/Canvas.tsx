@@ -1,4 +1,4 @@
-import React, { useRef, useState, useCallback, useEffect } from 'react'
+import React, { useRef, useState, useCallback, useEffect, useMemo } from 'react'
 import { useWorkspaceStore } from '../store/workspaceStore'
 import Panel from './Panel'
 import Minimap from './Minimap'
@@ -436,29 +436,32 @@ const handleGestureChange = (e: any) => {
   // — especially terminal xterm + pty stream — stays alive while popped out.
   // Hide panels that are stacked into another panel — the host renders their
   // body inline via the tab strip. Children kept mounted via host content slot.
-  const sortedPanels = Object.values(panels).filter(p => !p.stackParentId).sort((a, b) => {
+  const sortedPanels = useMemo(() => Object.values(panels).filter(p => !p.stackParentId).sort((a, b) => {
     if (a.type === 'region' && b.type !== 'region') return -1
     if (a.type !== 'region' && b.type === 'region') return 1
     return 0
-  })
+  }), [panels])
 
   // Viewport culling: panels whose screen-space rect sits completely outside the
   // window (with a generous margin) get marked offscreen. Panel applies CSS that
   // skips paint via visibility:hidden + content-visibility:hidden. State persists
   // because the React tree stays mounted — no terminal/webview unmount.
-  const vw = window.innerWidth
-  const vh = window.innerHeight
-  const margin = 800  // px in screen space — keep nearby panels warm for fast scroll-in
-  const offscreenIds = new Set<string>()
-  sortedPanels.forEach(p => {
-    const sx = p.x * viewport.zoom + viewport.x
-    const sy = p.y * viewport.zoom + viewport.y
-    const sw = p.width * viewport.zoom
-    const sh = p.height * viewport.zoom
-    if (sx + sw < -margin || sx > vw + margin || sy + sh < -margin || sy > vh + margin) {
-      offscreenIds.add(p.id)
-    }
-  })
+  const offscreenIds = useMemo(() => {
+    const vw = window.innerWidth
+    const vh = window.innerHeight
+    const margin = 800  // px in screen space — keep nearby panels warm for fast scroll-in
+    const ids = new Set<string>()
+    sortedPanels.forEach(p => {
+      const sx = p.x * viewport.zoom + viewport.x
+      const sy = p.y * viewport.zoom + viewport.y
+      const sw = p.width * viewport.zoom
+      const sh = p.height * viewport.zoom
+      if (sx + sw < -margin || sx > vw + margin || sy + sh < -margin || sy > vh + margin) {
+        ids.add(p.id)
+      }
+    })
+    return ids
+  }, [sortedPanels, viewport.x, viewport.y, viewport.zoom])
 
   return (
     <div

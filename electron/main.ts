@@ -8,6 +8,8 @@ import * as pty from 'node-pty'
 
 type PtySession = { proc: pty.IPty; panelId: string }
 const ptys = new Map<string, PtySession>()
+// Track which BrowserWindow owns each panel's pty so we send data only there.
+const ptyOwners = new Map<string, BrowserWindow>()
 // Per-pty scrollback ring buffer (raw ANSI bytes). New windows subscribing to
 // an existing pty replay this buffer to populate their xterm with prior context.
 const ptyBuffers = new Map<string, string>()
@@ -22,9 +24,14 @@ const appendPtyBuffer = (panelId: string, data: string) => {
   }
 }
 
-// Disable hardware acceleration on Linux to avoid GPU crashes
+// On Linux, force-enable GPU rasterization instead of disabling HW accel entirely.
+// Full disableHardwareAcceleration() kills xterm's WebGL renderer and makes terminals
+// crawl. These switches keep acceleration on while bypassing the blocklist that
+// triggers GPU crashes on some Intel/AMD setups.
 if (process.platform === 'linux') {
-  app.disableHardwareAcceleration()
+  app.commandLine.appendSwitch('ignore-gpu-blocklist')
+  app.commandLine.appendSwitch('enable-gpu-rasterization')
+  app.commandLine.appendSwitch('enable-zero-copy')
 }
 
 let mainWindow: BrowserWindow | null = null
@@ -338,7 +345,7 @@ ipcMain.handle('get-webview-preload-path', () => {
 })
 
 // ---- pty ----
-ipcMain.handle('pty:spawn', (_e, args: { panelId: string; cwd?: string; cols?: number; rows?: number; shell?: string }) => {
+ipcMain.handle('pty:spawn', (e, args: { panelId: string; cwd?: string; cols?: number; rows?: number; shell?: string }) => {
   const { panelId } = args
   if (ptys.has(panelId)) return { ok: true, panelId }
   const shellPath = args.shell || process.env.SHELL || '/bin/bash'
@@ -357,14 +364,26 @@ ipcMain.handle('pty:spawn', (_e, args: { panelId: string; cwd?: string; cols?: n
     cwd,
     env: { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor' }
   })
+  // Record which window owns this pty so data goes only there, not to all windows.
+  const ownerWin = BrowserWindow.fromWebContents(e.sender)
+  if (ownerWin) ptyOwners.set(panelId, ownerWin)
+  const sendPtyData = (channel: string, payload: unknown) => {
+    const owner = ptyOwners.get(panelId)
+    if (owner && !owner.isDestroyed()) {
+      try { owner.webContents.send(channel, payload) } catch { /* ignore */ }
+    } else {
+      broadcast(channel, payload)
+    }
+  }
   proc.onData(data => {
     appendPtyBuffer(panelId, data)
-    broadcast('pty:data', { panelId, data })
+    sendPtyData('pty:data', { panelId, data })
   })
   proc.onExit(({ exitCode, signal }) => {
-    broadcast('pty:exit', { panelId, exitCode, signal })
+    sendPtyData('pty:exit', { panelId, exitCode, signal })
     ptys.delete(panelId)
     ptyBuffers.delete(panelId)
+    ptyOwners.delete(panelId)
   })
   ptys.set(panelId, { proc, panelId })
   return { ok: true, panelId, pid: proc.pid, cwd, shell: shellPath }

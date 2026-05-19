@@ -37,10 +37,7 @@ function MainAppShell() {
     redo,
     theme,
     panels,
-    selectedPanelIds,
-    updatePanel,
     toggleMinimap,
-    jumpMode,
     setJumpMode,
     selectPanel,
     setViewport,
@@ -434,13 +431,14 @@ function MainAppShell() {
         }
         if (e.key === 'F2') {
           e.preventDefault()
-          if (selectedPanelIds.length === 1) {
-            useWorkspaceStore.getState().requestRename(selectedPanelIds[0])
+          const _sel = useWorkspaceStore.getState().selectedPanelIds
+          if (_sel.length === 1) {
+            useWorkspaceStore.getState().requestRename(_sel[0])
           }
           return
         }
         if (e.key === 'f' || e.key === 'F') {
-          if (selectedPanelIds.length > 0) {
+          if (useWorkspaceStore.getState().selectedPanelIds.length > 0) {
             e.preventDefault()
             const state = useWorkspaceStore.getState()
             // Distraction-free: hide top bar + status bar + minimap on F focus.
@@ -514,7 +512,8 @@ function MainAppShell() {
     // Capture phase so xterm/webview can't swallow Escape via stopPropagation before us.
     window.addEventListener('keydown', handleKeyDown, true)
     return () => window.removeEventListener('keydown', handleKeyDown, true)
-  }, [toggleCommandPalette, togglePanelFinder, toggleOutliner, toggleHelp, cycleTheme, undo, redo, panels, selectedPanelIds, updatePanel, toggleMinimap, jumpMode, setJumpMode, selectPanel, setViewport, toggleChrome])
+  // panels/selectedPanelIds/updatePanel/jumpMode omitted — handler reads live state via getState()
+  }, [toggleCommandPalette, togglePanelFinder, toggleOutliner, toggleHelp, cycleTheme, undo, redo, toggleMinimap, setJumpMode, selectPanel, setViewport, toggleChrome])
 
   useEffect(() => {
     const validCommands = new Set<WorkspaceCommand>([

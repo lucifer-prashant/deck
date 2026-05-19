@@ -44,6 +44,8 @@ const Minimap: React.FC = () => {
   const dragStart = useRef({ x: 0, y: 0, px: 0, py: 0 })
   const resizeStart = useRef({ x: 0, y: 0, s: 0 })
   const viewportDragStart = useRef({ x: 0, y: 0, vx: 0, vy: 0 })
+  const posFlushTimer = useRef<number>(0)
+  const sizeFlushTimer = useRef<number>(0)
 
   const bounds = useMemo(() => {
     const values = Object.values(panels)
@@ -74,11 +76,19 @@ const Minimap: React.FC = () => {
   const vpH = Math.max((window.innerHeight / viewport.zoom) * scale, 12)
 
   useEffect(() => {
-    localStorage.setItem('worktree-studio-minimap-pos', JSON.stringify(pos))
+    // Debounce: minimap pos updates at 60fps during drag — batch writes to avoid
+    // 60 synchronous localStorage calls/sec blocking the main thread.
+    window.clearTimeout(posFlushTimer.current)
+    posFlushTimer.current = window.setTimeout(() => {
+      localStorage.setItem('worktree-studio-minimap-pos', JSON.stringify(pos))
+    }, 300)
   }, [pos])
 
   useEffect(() => {
-    localStorage.setItem('worktree-studio-minimap-size', String(size))
+    window.clearTimeout(sizeFlushTimer.current)
+    sizeFlushTimer.current = window.setTimeout(() => {
+      localStorage.setItem('worktree-studio-minimap-size', String(size))
+    }, 300)
   }, [size])
 
   const handleClick = useCallback((e: React.MouseEvent) => {
