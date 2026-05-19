@@ -319,6 +319,15 @@ app.whenReady().then(async () => {
   try {
     await session.fromPartition('persist:wts-code-server').clearStorageData({ storages: ['serviceworkers'] })
   } catch { /* non-fatal */ }
+  // Set process icon for taskbar/app-switcher on Linux (BrowserWindow icon option
+  // only affects the window chrome; app.setIcon covers the taskbar tile).
+  if (process.platform === 'linux') {
+    try {
+      const { nativeImage } = await import('electron')
+      const img = nativeImage.createFromPath(join(__dirname, '../build/icons/512x512.png'))
+      if (!img.isEmpty()) app.setIcon(img)
+    } catch { /* non-fatal — icon just won't show */ }
+  }
   createWindow()
 })
 
