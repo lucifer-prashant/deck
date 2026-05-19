@@ -1,6 +1,6 @@
 {
   "name": "deck",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Spatial workspace for code — infinite canvas with terminals, editors, browsers, notes, git, and docking.",
   "main": "dist-electron/main.js",
   "scripts": {
