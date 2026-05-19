@@ -523,10 +523,13 @@ function MainAppShell() {
       'align-left', 'align-top', 'align-right', 'align-bottom',
       'distribute-horizontal', 'distribute-vertical',
       'group-region', 'ungroup-region',
-      'rename-selected', 'toggle-lock', 'toggle-minimize', 'bring-front', 'send-back', 'toggle-pin-front', 'focus-selected'
+      'rename-selected', 'toggle-lock', 'toggle-minimize', 'bring-front', 'send-back', 'toggle-pin-front', 'focus-selected',
+      'toggle-help'
     ])
 
     const removeListener = window.electronAPI?.onWorkspaceCommand?.((command) => {
+      // toggle-help fires from the menu and must work even when focus is inside a panel.
+      if (command === 'toggle-help') { executeWorkspaceCommand('toggle-help'); return }
       // Belt + suspenders: ignore IPC commands while typing OR while focus is in an embedded app.
       const active = document.activeElement as HTMLElement | null
       const isTextInput =

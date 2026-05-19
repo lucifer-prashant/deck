@@ -34,6 +34,7 @@ export type WorkspaceCommand =
   | 'focus-selected'
   | 'stack-selected'
   | 'unstack-selected'
+  | 'toggle-help'
 
 const panelDefaults: Record<Panel['type'], Pick<Panel, 'width' | 'height' | 'title'> & { content?: string }> = {
   terminal: { width: 600, height: 400, title: 'Terminal' },
@@ -373,5 +374,8 @@ export const executeWorkspaceCommand = (command: WorkspaceCommand) => {
       selected.forEach(p => store.updatePanel(p.id, { pinFront: nextPinned, pinBack: false }))
       break
     }
+    case 'toggle-help':
+      store.toggleHelp()
+      break
   }
 }

@@ -134,8 +134,23 @@ function buildMenu() {
     {
       label: 'Help',
       submenu: [
-        { label: 'About Worktree Studio' },
-        { label: 'Keyboard Shortcuts', accelerator: 'F1' }
+        {
+          label: 'About Deck',
+          click: () => {
+            dialog.showMessageBox(mainWindow!, {
+              type: 'info',
+              title: 'About Deck',
+              message: `Deck v${app.getVersion()}`,
+              detail: 'Spatial workspace for code — infinite canvas with terminals, editors, browsers, notes, git, and docking.\n\nGitHub: https://github.com/lucifer-prashant/deck\nContact: prashantverma1357@gmail.com',
+              buttons: ['OK']
+            })
+          }
+        },
+        {
+          label: 'Keyboard Shortcuts',
+          accelerator: 'F1',
+          click: () => send('toggle-help')
+        }
       ]
     }
   ]
@@ -160,7 +175,7 @@ function createWindow() {
       webviewTag: true
     },
     frame: true,
-    title: 'Worktree Studio'
+    title: 'Deck'
   })
 
   if (isDev) {
