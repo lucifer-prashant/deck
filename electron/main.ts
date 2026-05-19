@@ -175,7 +175,8 @@ function createWindow() {
       webviewTag: true
     },
     frame: true,
-    title: 'Deck'
+    title: 'Deck',
+    icon: join(__dirname, '../build/icons/512x512.png')
   })
 
   if (isDev) {
@@ -894,7 +895,8 @@ const createPopoutWindow = (panelId: string) => {
       devTools: true,
       webviewTag: true
     },
-    title: 'Worktree Studio — Panel'
+    title: 'Deck — Panel',
+    icon: join(__dirname, '../build/icons/512x512.png')
   })
   const query = `?popout=${encodeURIComponent(panelId)}`
   if (isDev) win.loadURL('http://localhost:5173/' + query)
