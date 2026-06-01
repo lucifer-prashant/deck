@@ -56,15 +56,6 @@ const PopoutWindow: React.FC<Props> = ({ panelId }) => {
       case 'terminal': return <TerminalPanel panel={panel} />
       case 'editor':   return <EditorPanel panel={panel} />
       case 'browser':  return <BrowserPanel panel={panel} />
-      case 'note':
-        return (
-          <textarea
-            className="popout-note"
-            value={panel.content || ''}
-            onChange={(e) => useWorkspaceStore.getState().updatePanel(panel.id, { content: e.target.value }, { skipHistory: true })}
-            spellCheck={false}
-          />
-        )
       default:
         return <div className="popout-missing">{panel.type} panel not supported in pop-out yet.</div>
     }

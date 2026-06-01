@@ -39,9 +39,6 @@ const EmptyState: React.FC = () => {
         <div className="welcome-section">
           <div className="welcome-section-title">Start</div>
           <div className="empty-actions">
-            <button className="quick-btn" onClick={() => executeWorkspaceCommand('new-note')}>
-              <span className="empty-key">N</span><span>Note</span>
-            </button>
             <button className="quick-btn" onClick={() => executeWorkspaceCommand('new-terminal')}>
               <span className="empty-key">T</span><span>Terminal</span>
             </button>

@@ -7,7 +7,6 @@ import WorkspaceChrome from './components/WorkspaceChrome'
 import Sidebar from './components/Sidebar'
 import StatusBar from './components/StatusBar'
 import HelpOverlay from './components/HelpOverlay'
-import EmptyState from './components/EmptyState'
 import JumpOverlay from './components/JumpOverlay'
 import PopoutWindow from './components/PopoutWindow'
 import { useWorkspaceStore } from './store/workspaceStore'
@@ -36,7 +35,6 @@ function MainAppShell() {
     undo,
     redo,
     theme,
-    panels,
     toggleMinimap,
     setJumpMode,
     selectPanel,
@@ -570,7 +568,7 @@ function MainAppShell() {
 
   useEffect(() => {
     const validCommands = new Set<WorkspaceCommand>([
-      'new-terminal', 'new-editor', 'new-note', 'new-tab', 'new-browser', 'new-region',
+      'new-terminal', 'new-editor', 'new-tab', 'new-browser', 'new-region',
       'clear-selection', 'clear-canvas', 'toggle-minimap',
       'select-all', 'duplicate-selected', 'fit-all', 'reset-viewport', 'zoom-in', 'zoom-out',
       'align-left', 'align-top', 'align-right', 'align-bottom',
@@ -619,8 +617,6 @@ function MainAppShell() {
     return () => { offD?.(); offR?.() }
   }, [])
 
-  const isEmpty = Object.keys(panels).length === 0
-
   return (
     <div className="app">
       {chromeVisible && <WorkspaceChrome />}
@@ -635,7 +631,6 @@ function MainAppShell() {
 
       <Sidebar />
       <AppCanvas />
-      {isEmpty && <EmptyState />}
       <StatusBar />
       {commandPaletteOpen && <CommandPalette />}
       <PanelFinder />

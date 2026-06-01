@@ -64,15 +64,10 @@ const GlobalSearch: React.FC = () => {
     const q = query.trim().toLowerCase()
     if (!q) return [] as Array<{ id: string; title: string; type: string; snippet?: string }>
     return Object.values(panels)
-      .filter(p => p.title.toLowerCase().includes(q) || (p.type === 'note' && (p.content || '').toLowerCase().includes(q)))
+      .filter(p => p.title.toLowerCase().includes(q))
       .slice(0, 20)
       .map(p => {
-        let snippet = ''
-        if (p.type === 'note' && p.content) {
-          const idx = p.content.toLowerCase().indexOf(q)
-          if (idx >= 0) snippet = p.content.slice(Math.max(0, idx - 24), idx + 80).replace(/\n/g, ' ')
-        }
-        return { id: p.id, title: p.title, type: p.type, snippet }
+        return { id: p.id, title: p.title, type: p.type, snippet: '' }
       })
   }, [panels, query])
 

@@ -3,7 +3,6 @@ import { Panel, useWorkspaceStore } from './store/workspaceStore'
 export type WorkspaceCommand =
   | 'new-terminal'
   | 'new-editor'
-  | 'new-note'
   | 'new-browser'
   | 'new-region'
   | 'new-tab'
@@ -38,7 +37,6 @@ export type WorkspaceCommand =
 const panelDefaults: Record<Panel['type'], Pick<Panel, 'width' | 'height' | 'title'> & { content?: string }> = {
   terminal: { width: 600, height: 400, title: 'Terminal' },
   editor: { width: 1100, height: 760, title: 'Editor' },
-  note: { width: 340, height: 240, title: 'Note', content: '' },
   browser: { width: 720, height: 560, title: 'Browser' },
   region: { width: 800, height: 600, title: 'Region' }
 }
@@ -254,9 +252,6 @@ export const executeWorkspaceCommand = (command: WorkspaceCommand) => {
       break
     case 'new-editor':
       createPanelAtViewportCenter('editor')
-      break
-    case 'new-note':
-      createPanelAtViewportCenter('note')
       break
     case 'new-browser':
       createPanelAtViewportCenter('browser')

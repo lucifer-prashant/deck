@@ -76,7 +76,7 @@ export type Theme = 'dark' | 'midnight' | 'light' | 'system'
 
 export interface Panel {
   id: string
-  type: 'terminal' | 'editor' | 'browser' | 'note' | 'region'
+  type: 'terminal' | 'editor' | 'browser' | 'region'
   x: number
   y: number
   width: number

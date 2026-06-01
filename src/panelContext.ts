@@ -81,8 +81,6 @@ export const explorerRootFor = (ctx: PanelContext | null): string | undefined =>
       return ctx.folderPath || ctx.projectPath || ctx.cwd
     case 'browser':
       return ctx.projectPath || ctx.folderPath
-    case 'note':
-      return ctx.folderPath || ctx.projectPath
     default:
       return ctx.folderPath || ctx.projectPath || ctx.cwd
   }

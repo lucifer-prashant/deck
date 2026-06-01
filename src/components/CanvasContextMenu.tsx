@@ -15,7 +15,6 @@ interface Props {
 const TYPE_DEFAULTS: Record<Panel['type'], { width: number; height: number; title: string; content?: string }> = {
   terminal: { width: 600, height: 400, title: 'Terminal' },
   editor: { width: 600, height: 400, title: 'Editor' },
-  note: { width: 340, height: 240, title: 'Note', content: '' },
   browser: { width: 800, height: 600, title: 'Browser' },
   region: { width: 800, height: 600, title: 'Region' }
 }
@@ -76,7 +75,6 @@ const CanvasContextMenu: React.FC<Props> = ({ x, y, worldX, worldY, onClose }) =
           <div className="ctx-submenu" onMouseEnter={() => setShowNew(true)} onMouseLeave={() => setShowNew(false)}>
             <button className="ctx-item" onClick={createAt('terminal')}><span>Terminal</span><span className="ctx-kbd">Ctrl+T</span></button>
             <button className="ctx-item" onClick={createAt('editor')}><span>Editor</span><span className="ctx-kbd">Ctrl+E</span></button>
-            <button className="ctx-item" onClick={createAt('note')}><span>Note</span><span className="ctx-kbd">Ctrl+N</span></button>
             <button className="ctx-item" onClick={createAt('browser')}><span>Browser</span></button>
             <button className="ctx-item" onClick={createAt('region')}><span>Region</span></button>
           </div>

@@ -26,7 +26,6 @@ const TYPE_ICON: Record<PanelType['type'], string> = {
   terminal: '▶',
   editor: '✎',
   browser: '◐',
-  note: '✦',
   region: '▢'
 }
 
@@ -71,22 +70,6 @@ const RETIRED_COLORS = new Set(['#d4a017', '#ffd36a', '#ffc517', '#ffbd2e'])
 const sanitizeColor = (c?: string): string | undefined => {
   if (!c) return undefined
   return RETIRED_COLORS.has(c.toLowerCase()) ? undefined : c
-}
-
-// Pick readable text color for a given background hex (#rrggbb).
-const readableOn = (hex: string): { fg: string; placeholder: string } => {
-  const m = hex.match(/^#?([0-9a-f]{6})$/i)
-  if (!m) return { fg: '#422006', placeholder: 'rgba(66,32,6,0.4)' }
-  const n = parseInt(m[1], 16)
-  const r = (n >> 16) & 0xff, g = (n >> 8) & 0xff, b = n & 0xff
-  // sRGB → relative luminance.
-  const lin = (c: number) => {
-    const s = c / 255
-    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4)
-  }
-  const L = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b)
-  if (L < 0.42) return { fg: '#fafaf5', placeholder: 'rgba(255,255,255,0.45)' }
-  return { fg: '#1a1107', placeholder: 'rgba(26,17,7,0.42)' }
 }
 
 const SleepPlaceholder: React.FC<{ panel: PanelType; onLoad: () => void }> = ({ panel, onLoad }) => {
@@ -713,12 +696,6 @@ const Panel: React.FC<PanelProps> = ({ panel, isSelected, offscreen, annotateMod
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isDragging, isResizing, dragStart, resizeStart, panel.id, panel.width, panel.height, onMove, onResize, pushHistory, setDragGuides])
 
-  const handleNoteInput = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    updatePanel(panel.id, { content: e.target.value }, { skipHistory: true })
-  }, [panel.id, updatePanel])
-
-  const handleNoteFocus = useCallback(() => { pushHistory() }, [pushHistory])
-
   // Esc is handled by the global cascade in App.tsx (blur note → focus panel outer → clear selection).
   // No per-key note handling needed; the textarea's onKeyDown stays at the wrapper level.
 
@@ -788,30 +765,6 @@ const Panel: React.FC<PanelProps> = ({ panel, isSelected, offscreen, annotateMod
         )
       case 'browser':
         return <BrowserPanel panel={panel} />
-      case 'note': {
-        if (lazyLoad) return <SleepPlaceholder panel={panel} onLoad={loadSleepingPanel} />
-        const noteStyle: React.CSSProperties = {}
-        const noteColor = sanitizeColor(panel.color)
-        if (noteColor) {
-          const { fg, placeholder } = readableOn(noteColor)
-          ;(noteStyle as Record<string, string>)['--note-bg'] = noteColor
-          ;(noteStyle as Record<string, string>)['--note-fg'] = fg
-          ;(noteStyle as Record<string, string>)['--note-placeholder'] = placeholder
-        }
-        return (
-          <textarea
-            className="panel-content note-content"
-            style={noteStyle}
-            value={panel.content || ''}
-            onChange={handleNoteInput}
-            onFocus={handleNoteFocus}
-            onMouseDown={handleBodyMouseDown}
-            onClick={(e) => e.stopPropagation()}
-            placeholder="Write something..."
-            spellCheck={false}
-          />
-        )
-      }
       case 'region':
         if (lazyLoad) return <SleepPlaceholder panel={panel} onLoad={loadSleepingPanel} />
         return (

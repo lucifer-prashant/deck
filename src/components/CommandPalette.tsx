@@ -73,7 +73,6 @@ const CommandPalette: React.FC = () => {
     const store = () => useWorkspaceStore.getState()
     const list: Item[] = [
       // Create
-      { id: 'new-note', label: 'New Note', category: 'Create', glyph: '✦', shortcut: 'Ctrl+N', run: wc('new-note') },
       { id: 'new-terminal', label: 'New Terminal', category: 'Create', glyph: '▶', shortcut: 'Ctrl+T', run: wc('new-terminal') },
       { id: 'new-editor', label: 'New Editor', category: 'Create', glyph: '✎', shortcut: 'Ctrl+E', run: wc('new-editor') },
       { id: 'new-browser', label: 'New Browser Preview', category: 'Create', glyph: '◐', run: wc('new-browser') },
