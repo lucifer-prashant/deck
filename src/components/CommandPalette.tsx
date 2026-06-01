@@ -105,7 +105,6 @@ const CommandPalette: React.FC = () => {
       { id: 'zoom-in', label: 'Zoom In', category: 'View', shortcut: 'Ctrl+=', run: wc('zoom-in') },
       { id: 'zoom-out', label: 'Zoom Out', category: 'View', shortcut: 'Ctrl+-', run: wc('zoom-out') },
       { id: 'toggle-minimap', label: 'Toggle Minimap', category: 'View', shortcut: 'M', run: wc('toggle-minimap') },
-      { id: 'toggle-snap', label: 'Toggle Snap to Grid', category: 'View', run: wc('toggle-snap') },
       { id: 'toggle-sidebar', label: 'Toggle Sidebar', category: 'View', shortcut: 'Ctrl+Shift+B', run: () => store().toggleSidebar() },
       { id: 'toggle-help', label: 'Show Keyboard Shortcuts', category: 'View', shortcut: '?', run: () => store().toggleHelp() },
       { id: 'cycle-theme', label: `Theme — ${theme} (cycle)`, category: 'View', glyph: '◐', shortcut: 'Ctrl+Shift+T', run: () => store().cycleTheme() },

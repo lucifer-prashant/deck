@@ -13,6 +13,7 @@ interface PanelProps {
   panel: PanelType
   isSelected: boolean
   offscreen?: boolean
+  annotateMode?: boolean
   embedded?: boolean  // rendered inside another panel's stack body — skip chrome + positioning
   onSelect: (id: string, additive: boolean) => void
   onMove: (id: string, x: number, y: number) => void
@@ -27,6 +28,39 @@ const TYPE_ICON: Record<PanelType['type'], string> = {
   browser: '◐',
   note: '✦',
   region: '▢'
+}
+
+const healthTitle = (s: string) => {
+  switch (s) {
+    case 'alive': return 'Terminal running'
+    case 'loading': return 'Loading...'
+    case 'sleeping': return 'Sleeping (click to wake)'
+    case 'loaded': return 'Loaded'
+    case 'dead': return 'Terminal exited — click to restart'
+    case 'crashed': return 'Crashed — click to reload'
+    default: return ''
+  }
+}
+
+function createRelationshipArrow(targetId: string) {
+  const s = useWorkspaceStore.getState()
+  const srcId = s.annotateSourcePanelId
+  if (!srcId || srcId === targetId) return
+  const src = s.panels[srcId]
+  const tgt = s.panels[targetId]
+  if (!src || !tgt) return
+  const anno = {
+    id: `rel-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    type: 'relationship' as const,
+    x: 0, y: 0, width: 0, height: 0,
+    text: '', color: s.drawColor || '#6b7280',
+    sourcePanelId: srcId,
+    targetPanelId: targetId,
+    sourceAnchor: 'center' as const,
+    targetAnchor: 'center' as const
+  }
+  s.addAnnotation(anno)
+  s.setAnnotateSourcePanel(null)
 }
 
 const SNAP_PX = 6 // screen-space alignment-guide threshold
@@ -112,7 +146,7 @@ const SleepPlaceholder: React.FC<{ panel: PanelType; onLoad: () => void }> = ({ 
   )
 }
 
-const Panel: React.FC<PanelProps> = ({ panel, isSelected, offscreen, embedded, onSelect, onMove, onResize }) => {
+const Panel: React.FC<PanelProps> = ({ panel, isSelected, offscreen, annotateMode, embedded, onSelect, onMove, onResize }) => {
   const panelRef = useRef<HTMLDivElement>(null)
   const titleInputRef = useRef<HTMLInputElement>(null)
   const [isDragging, setIsDragging] = useState(false)
@@ -124,6 +158,7 @@ const Panel: React.FC<PanelProps> = ({ panel, isSelected, offscreen, embedded, o
   const [draftTitle, setDraftTitle] = useState(panel.title)
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; targetPanel?: PanelType } | null>(null)
   const initialPositions = useRef<Map<string, { x: number; y: number }>>(new Map())
+  const annoInitialPositions = useRef<Array<{ id: string; x: number; y: number }>>([])
   const dragMoved = useRef(false)
   // Cached header elements for stack-merge hit testing during drag.
   // Populated once at drag start, cleared on mouseup — avoids querySelectorAll at 60fps.
@@ -195,6 +230,18 @@ const Panel: React.FC<PanelProps> = ({ panel, isSelected, offscreen, embedded, o
     if (renaming) return
     if (e.button === 2) return
     if (jumpModeActive) { e.stopPropagation(); return }
+    if (annotateMode) {
+      const s = useWorkspaceStore.getState()
+      const tool = s.annotateTool
+      if (tool === 'arrow' && s.annotateSourcePanelId && s.annotateSourcePanelId !== panel.id) {
+        e.stopPropagation()
+        createRelationshipArrow(panel.id)
+        return
+      }
+      // Block panel interaction when in annotate mode.
+      e.stopPropagation()
+      return
+    }
     // Mousedown inside terminal xterm or note textarea must go to the embedded
     // app (selection / cursor placement) — don't initiate a panel drag here.
     // The header still drags normally because xterm/note don't live there.
@@ -220,7 +267,7 @@ const Panel: React.FC<PanelProps> = ({ panel, isSelected, offscreen, embedded, o
 
     const additive = e.shiftKey || e.ctrlKey || e.metaKey
     const sBefore = useWorkspaceStore.getState()
-    const alreadyInMulti = sBefore.selectedPanelIds.length > 1 && sBefore.selectedPanelIds.includes(panel.id)
+    const alreadyInMulti = (sBefore.selectedPanelIds.length > 1 || sBefore.selectedAnnotationIds.length > 0) && sBefore.selectedPanelIds.includes(panel.id)
 
     if (additive) {
       onSelect(panel.id, true)
@@ -285,16 +332,28 @@ const Panel: React.FC<PanelProps> = ({ panel, isSelected, offscreen, embedded, o
         cachedHeaders.current!.push({ el: h, pid, rect: h.getBoundingClientRect() })
       })
     }
-  }, [panel.id, panel.type, panel.locked, panel.pinFront, panel.pinBack, panel.zIndex, onSelect, renaming, updatePanel, jumpModeActive])
+
+    // Cache selected annotation positions for cross-type multi-move.
+    const s3 = useWorkspaceStore.getState()
+    const tab = s3.tabs.find(t => t.id === s3.activeTabId)
+    if (tab?.annotations && s3.selectedAnnotationIds.length > 0) {
+      annoInitialPositions.current = s3.selectedAnnotationIds.map(id => {
+        const a = tab.annotations!.find(aa => aa.id === id)
+        return a ? { id, x: a.x, y: a.y } : null
+      }).filter(Boolean) as { id: string; x: number; y: number }[]
+    } else {
+      annoInitialPositions.current = []
+    }
+  }, [panel.id, panel.type, panel.locked, panel.pinFront, panel.pinBack, panel.zIndex, onSelect, renaming, updatePanel, jumpModeActive, annotateMode])
 
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
-    if (jumpModeActive) return
+    if (jumpModeActive || annotateMode) return
     e.preventDefault()
     e.stopPropagation()
     const s = useWorkspaceStore.getState()
     if (!s.selectedPanelIds.includes(panel.id)) onSelect(panel.id, false)
     setCtxMenu({ x: e.clientX, y: e.clientY })
-  }, [panel.id, onSelect, jumpModeActive])
+  }, [panel.id, onSelect, jumpModeActive, annotateMode])
 
   const handleClose = useCallback((e: React.MouseEvent) => {
     e.stopPropagation()
@@ -304,7 +363,7 @@ const Panel: React.FC<PanelProps> = ({ panel, isSelected, offscreen, embedded, o
   const handleResizeMouseDown = useCallback((dir: ResizeDir) => (e: React.MouseEvent) => {
     e.stopPropagation()
     e.preventDefault()
-    if (panel.locked) return
+    if (panel.locked || annotateMode) return
     pushHistory()
     setIsResizing(dir)
     setResizeStart({
@@ -315,7 +374,7 @@ const Panel: React.FC<PanelProps> = ({ panel, isSelected, offscreen, embedded, o
       panelX: panel.x,
       panelY: panel.y
     })
-  }, [panel.width, panel.height, panel.x, panel.y, panel.locked, pushHistory])
+  }, [panel.width, panel.height, panel.x, panel.y, panel.locked, annotateMode, pushHistory])
 
   const toggleMinimized = useCallback((e: React.MouseEvent) => {
     e.stopPropagation()
@@ -360,7 +419,6 @@ const Panel: React.FC<PanelProps> = ({ panel, isSelected, offscreen, embedded, o
         }
         const s = useWorkspaceStore.getState()
         const viewport = s.viewport
-        const snapToGrid = s.snapToGrid
         let newX = (e.clientX - dragStart.x - viewport.x) / viewport.zoom
         let newY = (e.clientY - dragStart.y - viewport.y) / viewport.zoom
 
@@ -370,10 +428,8 @@ const Panel: React.FC<PanelProps> = ({ panel, isSelected, offscreen, embedded, o
 
         let snapX: number | null = null
         let snapY: number | null = null
-        // All snap behavior (alignment guides + grid) gated behind the Snap toggle.
-        // When user turns Snap off, panel follows cursor exactly — no jerk anywhere.
-        // Shift always disables snap.
-        if (!isMulti && !e.shiftKey && snapToGrid) {
+        // Alignment guides — always active, Shift disables.
+        if (!isMulti && !e.shiftKey) {
           const tolWorld = SNAP_PX / viewport.zoom
           const myL = newX
           const myR = newX + panel.width
@@ -437,18 +493,21 @@ const Panel: React.FC<PanelProps> = ({ panel, isSelected, offscreen, embedded, o
         }
 
         if (isMulti && anchor) {
-          let dx = newX - anchor.x
-          let dy = newY - anchor.y
-          if (snapToGrid) {
-            dx = Math.round(dx / 20) * 20
-            dy = Math.round(dy / 20) * 20
-          }
+          const dx = newX - anchor.x
+          const dy = newY - anchor.y
           const finalPositions = new Map<string, { x: number; y: number }>()
           initial.forEach((pos, id) => {
             const nx = pos.x + dx, ny = pos.y + dy
             setPanelTransform(id, nx - pos.x, ny - pos.y)
             finalPositions.set(id, { x: nx, y: ny })
           })
+          // Move selected annotations in sync with panels.
+          if (annoInitialPositions.current.length > 0) {
+            const sAnno = useWorkspaceStore.getState()
+            annoInitialPositions.current.forEach(({ id, x, y }) => {
+              sAnno.updateAnnotation(id, { x: x + dx, y: y + dy })
+            })
+          }
           // CRITICAL: write final inline left/top AND clear transform BEFORE flushSync.
           // Otherwise React commits new left/top while the transform offset is still on
           // the DOM, briefly placing the panel at (finalX + dragOffset) — the jerk.
@@ -484,14 +543,19 @@ const Panel: React.FC<PanelProps> = ({ panel, isSelected, offscreen, embedded, o
             if (toCheck.length) s2.updateRegionMembership(toCheck)
           }
         } else {
-          let liveX = newX, liveY = newY
-          if (snapToGrid && !e.shiftKey) {
-            liveX = Math.round(liveX / 20) * 20
-            liveY = Math.round(liveY / 20) * 20
-          }
+          const liveX = newX, liveY = newY
           const anchorSingle = initial.get(panel.id) || { x: panel.x, y: panel.y }
           setPanelTransform(panel.id, liveX - anchorSingle.x, liveY - anchorSingle.y)
           const finalX = liveX, finalY = liveY
+          // Move selected annotations in sync with this panel.
+          if (annoInitialPositions.current.length > 0) {
+            const sAnno = useWorkspaceStore.getState()
+            const adx = liveX - anchorSingle.x
+            const ady = liveY - anchorSingle.y
+            annoInitialPositions.current.forEach(({ id, x, y }) => {
+              sAnno.updateAnnotation(id, { x: x + adx, y: y + ady })
+            })
+          }
 
           // Drag-onto-header → stack merge detection. Use headers cached at drag start
           // (avoids querySelectorAll at 60fps). Skip for regions.
@@ -621,7 +685,8 @@ const Panel: React.FC<PanelProps> = ({ panel, isSelected, offscreen, embedded, o
       resizeCommit = null
       // Click-only on a multi-selected panel (no drag past threshold) → collapse selection
       // to single now. Dragging consumed the intent → keep multi.
-      if (pendingCollapseToSingle.current && !dragMoved.current) {
+      // If annotations are also selected, keep both selections — don't collapse.
+      if (pendingCollapseToSingle.current && !dragMoved.current && !useWorkspaceStore.getState().selectedAnnotationIds.length) {
         useWorkspaceStore.getState().selectPanel(panel.id, false)
       }
       pendingCollapseToSingle.current = false
@@ -794,11 +859,24 @@ const Panel: React.FC<PanelProps> = ({ panel, isSelected, offscreen, embedded, o
         onMouseDown={handleMouseDown}
         onContextMenu={handleContextMenu}
         data-panel-id={panel.id}
+        data-panel-type={panel.type}
         tabIndex={-1}
       >
         {accent && <div className="panel-accent-bar" style={{ background: accent }} />}
         <div className="panel-header" onDoubleClick={(e) => { e.stopPropagation(); beginRename() }}>
           <span className="panel-type-icon" aria-hidden>{TYPE_ICON[panel.type]}</span>
+          {(panel.type === 'terminal' || panel.type === 'browser' || panel.type === 'editor') && panel.healthState && (
+            <span
+              className={`panel-health-dot health-${panel.healthState}`}
+              title={healthTitle(panel.healthState)}
+              onClick={(e) => {
+                e.stopPropagation()
+                if (panel.healthState === 'dead' || panel.healthState === 'crashed') {
+                  window.dispatchEvent(new CustomEvent('deck:restart-panel', { detail: panel.id }))
+                }
+              }}
+            />
+          )}
           {renaming ? (
             <input
               ref={titleInputRef}

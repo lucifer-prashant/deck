@@ -35,10 +35,17 @@ const THEME = {
 const TerminalPanel: React.FC<Props> = ({ panel }) => {
   const containerRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
-  const fitRef = useRef<FitAddon | null>(null)
-  const disposeData = useRef<(() => void) | null>(null)
-  const disposeExit = useRef<(() => void) | null>(null)
-  const spawnedRef = useRef(false)
+    const fitRef = useRef<FitAddon | null>(null)
+    const disposeData = useRef<(() => void) | null>(null)
+    const disposeExit = useRef<(() => void) | null>(null)
+    const spawnedRef = useRef(false)
+    const updatePanel = useWorkspaceStore(s => s.updatePanel)
+
+    // Set initial health state.
+    useEffect(() => {
+      updatePanel(panel.id, { healthState: 'alive' }, { skipHistory: true })
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [])
 
   useEffect(() => {
     if (!containerRef.current) return
@@ -99,6 +106,7 @@ const TerminalPanel: React.FC<Props> = ({ panel }) => {
     disposeExit.current = api.onExit((id, info) => {
       if (id !== panel.id) return
       term.writeln(`\r\n\x1b[90m[process exited code=${info.exitCode}]\x1b[0m`)
+      updatePanel(panel.id, { healthState: 'dead' }, { skipHistory: true })
     })
     // Pull existing scrollback (preserved per-pty in main process) so a new
     // xterm — fresh pop-out window or re-attach after restart — shows the

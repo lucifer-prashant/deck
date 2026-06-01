@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useWorkspaceStore, Panel as PanelType } from '../store/workspaceStore'
 import { executeWorkspaceCommand } from '../workspaceCommands'
@@ -23,15 +23,18 @@ const COLORS = [
   { name: 'Violet', value: '#7c3aed' }
 ]
 
+type Submenu = 'arrange' | 'layout' | 'browser' | null
+
 const PanelContextMenu: React.FC<Props> = ({ panel, x, y, onClose, onRename }) => {
   const menuRef = useRef<HTMLDivElement>(null)
+  const [submenu, setSubmenu] = useState<Submenu>(null)
   const { updatePanel, deletePanel, selectedPanelIds, selectPanel, panels } = useWorkspaceStore()
   const isPresetBrowser =
     (panel.id.startsWith('preset-life-') || panel.id.startsWith('preset-no-life-')) &&
     panel.type === 'browser'
   const isAsleep = panel.type === 'browser' && !!(panel.settings as { lazyLoad?: boolean } | undefined)?.lazyLoad
+  const isStacked = !!(panel.stackParentId || (panel.stackChildren && panel.stackChildren.length > 0))
 
-  // Per-panel front/back state so user can toggle individually.
   const isAtFront = useMemo(() => {
     const maxZ = Math.max(1, ...Object.values(panels).map(p => p.zIndex || 1))
     return (panel.zIndex || 1) >= maxZ && Object.values(panels).filter(p => (p.zIndex || 1) === maxZ).length === 1
@@ -56,7 +59,6 @@ const PanelContextMenu: React.FC<Props> = ({ panel, x, y, onClose, onRename }) =
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) onClose()
     }
     const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-    // capture: true so child stopPropagation doesn't swallow the close signal.
     window.addEventListener('mousedown', handler, true)
     window.addEventListener('contextmenu', handler, true)
     window.addEventListener('keydown', esc, true)
@@ -83,12 +85,13 @@ const PanelContextMenu: React.FC<Props> = ({ panel, x, y, onClose, onRename }) =
     onClose()
   }
 
-  // Clamp position to viewport; never let top/left go negative on short windows.
   const left = Math.max(6, Math.min(x, window.innerWidth - 246))
   const top = Math.max(6, Math.min(y, window.innerHeight - 366))
 
   return createPortal(
     <div ref={menuRef} className="ctx-menu" style={{ left, top }} onContextMenu={(e) => e.preventDefault()}>
+
+      {/* ── Core actions ── */}
       <button className="ctx-item" onClick={() => { onRename(); onClose() }}>
         <span>Rename</span><span className="ctx-kbd">F2</span>
       </button>
@@ -97,82 +100,138 @@ const PanelContextMenu: React.FC<Props> = ({ panel, x, y, onClose, onRename }) =
       </button>
       {panel.type !== 'region' && (
         <button className="ctx-item" onClick={run(() => {
-          // If stacked, unstack first so the panel keeps its original size.
-          if (panel.stackParentId) {
-            useWorkspaceStore.getState().unstackPanel(panel.id)
-          }
+          if (panel.stackParentId) useWorkspaceStore.getState().unstackPanel(panel.id)
           window.electronAPI?.window?.popoutPanel(panel.id)
         })}>
           <span>Pop out to window</span><span className="ctx-kbd">⇱</span>
         </button>
       )}
-      {(panel.stackParentId || (panel.stackChildren && panel.stackChildren.length > 0)) && (
-        <button className="ctx-item" onClick={run(() => {
-          useWorkspaceStore.getState().unstackPanel(panel.id)
-        })}>
-          <span>Unstack panel</span>
-        </button>
-      )}
+
       <div className="ctx-sep" />
+
+      {/* ── State toggles ── */}
       <button className="ctx-item" onClick={run(() => updatePanel(panel.id, { locked: !panel.locked }))}>
         <span>{panel.locked ? 'Unlock' : 'Lock'}</span>
       </button>
       <button className="ctx-item" onClick={run(() => updatePanel(panel.id, { minimized: !panel.minimized }))}>
         <span>{panel.minimized ? 'Restore' : 'Minimize'}</span>
       </button>
-      {panel.type === 'browser' && (
-        <button className="ctx-item" onClick={run(() => updatePanel(panel.id, {
-          settings: { ...(panel.settings || {}), lazyLoad: !isAsleep }
-        }, { skipHistory: true }))}>
-          <span>{isAsleep ? 'Wake panel' : 'Put to sleep'}</span>
-        </button>
-      )}
-      {isPresetBrowser && !isAsleep && (
-        <>
-          <button className="ctx-item" onClick={run(() => updatePanel(panel.id, {
-            settings: { ...(panel.settings || {}), browserCommand: { name: 'reload', nonce: Date.now() } }
-          }, { skipHistory: true }))}>
-            <span>Reload view</span>
-          </button>
-          <button className="ctx-item" onClick={run(() => updatePanel(panel.id, {
-            settings: { ...(panel.settings || {}), browserCommand: { name: 'back', nonce: Date.now() } }
-          }, { skipHistory: true }))}>
-            <span>Go back</span>
-          </button>
-          <button className="ctx-item" onClick={run(() => updatePanel(panel.id, {
-            settings: { ...(panel.settings || {}), browserCommand: { name: 'forward', nonce: Date.now() } }
-          }, { skipHistory: true }))}>
-            <span>Go forward</span>
-          </button>
-        </>
-      )}
-      <button className="ctx-item" onClick={run(() => updatePanel(panel.id, { pinFront: !panel.pinFront, pinBack: false }))}>
-        <span>{panel.pinFront ? 'Unpin from front' : 'Pin to front'}</span>
-        {panel.pinFront && <span className="ctx-kbd">on</span>}
-      </button>
-      <button className="ctx-item" onClick={run(() => updatePanel(panel.id, { pinBack: !panel.pinBack, pinFront: false }))}>
-        <span>{panel.pinBack ? 'Unpin from back' : 'Pin to back'}</span>
-        {panel.pinBack && <span className="ctx-kbd">on</span>}
-      </button>
       <button className="ctx-item" onClick={run(() => updatePanel(panel.id, { starred: !panel.starred }))}>
         <span>{panel.starred ? 'Unstar' : 'Star'}</span>
         {panel.starred && <span className="ctx-kbd">★</span>}
       </button>
-      <button className="ctx-item" onClick={run(() => {
-        const next = window.prompt('Subtitle / description', panel.description || '')
-        if (next !== null) updatePanel(panel.id, { description: next.trim() || undefined })
-      })}>
-        <span>Set description…</span>
-      </button>
-      <button className="ctx-item" onClick={run(raise)} disabled={isAtFront}>
-        <span>Bring to front</span>
-        {isAtFront && <span className="ctx-kbd">at top</span>}
-      </button>
-      <button className="ctx-item" onClick={run(lower)} disabled={isAtBack}>
-        <span>Send to back</span>
-        {isAtBack && <span className="ctx-kbd">at back</span>}
-      </button>
+
       <div className="ctx-sep" />
+
+      {/* ── Arrange submenu ── */}
+      <div
+        className={`ctx-item ctx-submenu-trigger ${submenu === 'arrange' ? 'sub-open' : ''}`}
+        onMouseEnter={() => setSubmenu('arrange')}
+        onMouseLeave={() => setSubmenu(null)}
+      >
+        <span>Arrange</span><span className="ctx-sub-arrow">▸</span>
+        {submenu === 'arrange' && (
+          <div className="ctx-submenu" onMouseEnter={() => setSubmenu('arrange')} onMouseLeave={() => setSubmenu(null)}>
+            <button className="ctx-item" onClick={run(raise)} disabled={isAtFront}>
+              <span>Bring to front</span>
+              {isAtFront && <span className="ctx-kbd">at top</span>}
+            </button>
+            <button className="ctx-item" onClick={run(lower)} disabled={isAtBack}>
+              <span>Send to back</span>
+              {isAtBack && <span className="ctx-kbd">at back</span>}
+            </button>
+            <button className="ctx-item" onClick={run(() => updatePanel(panel.id, { pinFront: !panel.pinFront, pinBack: false }))}>
+              <span>{panel.pinFront ? 'Unpin from front' : 'Pin to front'}</span>
+              {panel.pinFront && <span className="ctx-kbd">on</span>}
+            </button>
+            <button className="ctx-item" onClick={run(() => updatePanel(panel.id, { pinBack: !panel.pinBack, pinFront: false }))}>
+              <span>{panel.pinBack ? 'Unpin from back' : 'Pin to back'}</span>
+              {panel.pinBack && <span className="ctx-kbd">on</span>}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* ── Layout submenu ── */}
+      <div
+        className={`ctx-item ctx-submenu-trigger ${submenu === 'layout' ? 'sub-open' : ''}`}
+        onMouseEnter={() => setSubmenu('layout')}
+        onMouseLeave={() => setSubmenu(null)}
+      >
+        <span>Layout</span><span className="ctx-sub-arrow">▸</span>
+        {submenu === 'layout' && (
+          <div className="ctx-submenu" onMouseEnter={() => setSubmenu('layout')} onMouseLeave={() => setSubmenu(null)}>
+            {isStacked && (
+              <button className="ctx-item" onClick={run(() => useWorkspaceStore.getState().unstackPanel(panel.id))}>
+                <span>Unstack panel</span>
+              </button>
+            )}
+            {selectedPanelIds.length > 1 && (
+              <button className="ctx-item" onClick={cmd('group-region')}>
+                <span>Group into region</span><span className="ctx-kbd">Ctrl+G</span>
+              </button>
+            )}
+            {panel.type === 'region' && (
+              <button className="ctx-item" onClick={cmd('ungroup-region')}>
+                <span>Ungroup region</span>
+              </button>
+            )}
+            {(isStacked || selectedPanelIds.length > 1 || panel.type === 'region') && selectedPanelIds.length > 1 && (
+              <div className="ctx-sep" />
+            )}
+            {selectedPanelIds.length > 1 && (
+              <>
+                <button className="ctx-item" onClick={cmd('align-left')}><span>Align left</span></button>
+                <button className="ctx-item" onClick={cmd('align-top')}><span>Align top</span></button>
+                <button className="ctx-item" onClick={cmd('distribute-horizontal')}><span>Distribute horiz.</span></button>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* ── Browser submenu ── */}
+      {panel.type === 'browser' && (
+        <div
+          className={`ctx-item ctx-submenu-trigger ${submenu === 'browser' ? 'sub-open' : ''}`}
+          onMouseEnter={() => setSubmenu('browser')}
+          onMouseLeave={() => setSubmenu(null)}
+        >
+          <span>Browser</span><span className="ctx-sub-arrow">▸</span>
+          {submenu === 'browser' && (
+            <div className="ctx-submenu" onMouseEnter={() => setSubmenu('browser')} onMouseLeave={() => setSubmenu(null)}>
+              <button className="ctx-item" onClick={run(() => updatePanel(panel.id, {
+                settings: { ...(panel.settings || {}), lazyLoad: !isAsleep }
+              }, { skipHistory: true }))}>
+                <span>{isAsleep ? 'Wake panel' : 'Put to sleep'}</span>
+              </button>
+              {isPresetBrowser && !isAsleep && (
+                <>
+                  <button className="ctx-item" onClick={run(() => updatePanel(panel.id, {
+                    settings: { ...(panel.settings || {}), browserCommand: { name: 'reload', nonce: Date.now() } }
+                  }, { skipHistory: true }))}>
+                    <span>Reload view</span>
+                  </button>
+                  <button className="ctx-item" onClick={run(() => updatePanel(panel.id, {
+                    settings: { ...(panel.settings || {}), browserCommand: { name: 'back', nonce: Date.now() } }
+                  }, { skipHistory: true }))}>
+                    <span>Go back</span>
+                  </button>
+                  <button className="ctx-item" onClick={run(() => updatePanel(panel.id, {
+                    settings: { ...(panel.settings || {}), browserCommand: { name: 'forward', nonce: Date.now() } }
+                  }, { skipHistory: true }))}>
+                    <span>Go forward</span>
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="ctx-sep" />
+
+      {/* ── Color ── */}
       <div className="ctx-section">Color</div>
       <div className="ctx-colors">
         {COLORS.map(c => (
@@ -185,22 +244,10 @@ const PanelContextMenu: React.FC<Props> = ({ panel, x, y, onClose, onRename }) =
           />
         ))}
       </div>
+
       <div className="ctx-sep" />
-      {selectedPanelIds.length > 1 && (
-        <>
-          <button className="ctx-item" onClick={cmd('group-region')}><span>Group into region</span><span className="ctx-kbd">Ctrl+G</span></button>
-          <button className="ctx-item" onClick={cmd('align-left')}><span>Align left</span></button>
-          <button className="ctx-item" onClick={cmd('align-top')}><span>Align top</span></button>
-          <button className="ctx-item" onClick={cmd('distribute-horizontal')}><span>Distribute horiz.</span></button>
-          <div className="ctx-sep" />
-        </>
-      )}
-      {panel.type === 'region' && (
-        <>
-          <button className="ctx-item" onClick={cmd('ungroup-region')}><span>Ungroup region</span></button>
-          <div className="ctx-sep" />
-        </>
-      )}
+
+      {/* ── Delete ── */}
       <button className="ctx-item danger" onClick={run(() => deletePanel(panel.id))}>
         <span>Delete</span><span className="ctx-kbd">Del</span>
       </button>

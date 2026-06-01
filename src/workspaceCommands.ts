@@ -10,7 +10,6 @@ export type WorkspaceCommand =
   | 'clear-selection'
   | 'clear-canvas'
   | 'toggle-minimap'
-  | 'toggle-snap'
   | 'select-all'
   | 'duplicate-selected'
   | 'fit-all'
@@ -95,7 +94,30 @@ export const fitPanelsToViewport = (panels: Panel[]) => {
   }
 
   const padding = 96
-  const zoom = Math.max(0.1, Math.min(2, Math.min(
+  const zoom = Math.max(0.25, Math.min(2, Math.min(
+    (window.innerWidth - padding * 2) / Math.max(bounds.width, 1),
+    (window.innerHeight - padding * 2) / Math.max(bounds.height, 1)
+  )))
+
+  store.setViewport({
+    zoom,
+    x: window.innerWidth / 2 - (bounds.x + bounds.width / 2) * zoom,
+    y: window.innerHeight / 2 - (bounds.y + bounds.height / 2) * zoom
+  })
+}
+
+export const fitItemsToViewport = (items: Array<{ x: number; y: number; width: number; height: number }>) => {
+  flagSmoothViewport()
+  if (items.length === 0) return
+  const minX = Math.min(...items.map(i => i.x))
+  const minY = Math.min(...items.map(i => i.y))
+  const maxX = Math.max(...items.map(i => i.x + i.width))
+  const maxY = Math.max(...items.map(i => i.y + i.height))
+  const bounds = { x: minX, y: minY, width: maxX - minX, height: maxY - minY }
+
+  const padding = 96
+  const store = useWorkspaceStore.getState()
+  const zoom = Math.max(0.25, Math.min(2, Math.min(
     (window.innerWidth - padding * 2) / Math.max(bounds.width, 1),
     (window.innerHeight - padding * 2) / Math.max(bounds.height, 1)
   )))
@@ -119,14 +141,12 @@ const updateSelected = (updates: Partial<Panel>) => {
 
 const duplicateSelected = () => {
   const store = useWorkspaceStore.getState()
-  const newIds: string[] = []
+  const newPanelIds: string[] = []
   const selected = getSelectedPanels()
-  // Count existing copies of each source to set incremental offset.
   const offsetBase = 32
   selected.forEach((panel, i) => {
     const id = `${panel.type}-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 5)}`
-    newIds.push(id)
-    // Look at existing panels to find next free offset slot for this source position.
+    newPanelIds.push(id)
     const all = Object.values(store.panels)
     let step = 1
     while (all.some(p => Math.abs(p.x - (panel.x + step * offsetBase)) < 4 && Math.abs(p.y - (panel.y + step * offsetBase)) < 4)) {
@@ -144,7 +164,25 @@ const duplicateSelected = () => {
       pinBack: false
     })
   })
-  if (newIds.length > 0) store.selectMultiple(newIds)
+  if (newPanelIds.length > 0) store.selectMultiple(newPanelIds)
+
+  const newAnnoIds: string[] = []
+  const tab = store.tabs.find(t => t.id === store.activeTabId)
+  if (tab?.annotations && store.selectedAnnotationIds.length > 0) {
+    const selectedAnnos = tab.annotations.filter(a => store.selectedAnnotationIds.includes(a.id))
+    selectedAnnos.forEach((a, i) => {
+      const id = `anno-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 7)}`
+      newAnnoIds.push(id)
+      store.addAnnotation({
+        ...a,
+        id,
+        x: a.x + offsetBase,
+        y: a.y + offsetBase,
+        title: (a.title || 'Annotation') + ' Copy'
+      })
+    })
+  }
+  if (newAnnoIds.length > 0) store.selectMultipleAnnotations(newAnnoIds)
 }
 
 const alignSelected = (edge: 'left' | 'top' | 'right' | 'bottom') => {
@@ -265,11 +303,16 @@ export const executeWorkspaceCommand = (command: WorkspaceCommand) => {
     case 'toggle-minimap':
       store.toggleMinimap()
       break
-    case 'toggle-snap':
-      store.toggleSnapToGrid()
-      break
     case 'select-all':
       store.selectMultiple(Object.keys(store.panels))
+      {
+        const tab = store.tabs.find(t => t.id === store.activeTabId)
+        if (tab?.annotations) {
+          const domTypes = new Set(['sticky', 'label', 'image'])
+          const annoIds = tab.annotations.filter(a => domTypes.has(a.type)).map(a => a.id)
+          if (annoIds.length > 0) store.selectMultipleAnnotations(annoIds)
+        }
+      }
       break
     case 'duplicate-selected':
       duplicateSelected()

@@ -1,0 +1,198 @@
+.annotate-toolbar {
+	position: fixed;
+	top: 52px;
+	left: 50%;
+	transform: translateX(-50%);
+	z-index: 6000;
+	display: flex;
+	align-items: center;
+	gap: 2px;
+	padding: 4px 6px;
+	background: var(--panel-bg, #ffffff);
+	border: 0.5px solid var(--border, rgba(0, 0, 0, 0.12));
+	border-radius: 10px;
+	box-shadow:
+		0 2px 8px rgba(0, 0, 0, 0.1),
+		0 0 0 0.5px rgba(0, 0, 0, 0.04);
+	user-select: none;
+}
+
+/* dark mode — your app already sets --panel-bg so this is a fallback */
+@media (prefers-color-scheme: dark) {
+	.annotate-toolbar {
+		background: var(--panel-bg, #1e2025);
+		border-color: var(--border, rgba(255, 255, 255, 0.08));
+		box-shadow:
+			0 2px 12px rgba(0, 0, 0, 0.4),
+			0 0 0 0.5px rgba(0, 0, 0, 0.2);
+	}
+}
+
+.annotate-toolbar-left {
+	display: flex;
+	align-items: center;
+	gap: 1px;
+}
+
+.annotate-toolbar-right {
+	display: flex;
+	align-items: center;
+	gap: 1px;
+	margin-left: 2px;
+}
+
+.annotate-toolbar-sep {
+	width: 0.5px;
+	height: 18px;
+	background: var(--border, rgba(0, 0, 0, 0.1));
+	margin: 0 5px;
+	flex-shrink: 0;
+}
+
+@media (prefers-color-scheme: dark) {
+	.annotate-toolbar-sep {
+		background: rgba(255, 255, 255, 0.1);
+	}
+}
+
+.annotate-tool-btn {
+	width: 28px;
+	height: 26px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: transparent;
+	border: none;
+	border-radius: 6px;
+	color: var(--fg-muted, rgba(0, 0, 0, 0.4));
+	font-size: 15px;
+	cursor: pointer;
+	transition:
+		background 0.1s,
+		color 0.1s;
+}
+
+@media (prefers-color-scheme: dark) {
+	.annotate-tool-btn {
+		color: rgba(255, 255, 255, 0.4);
+	}
+}
+
+.annotate-tool-btn:hover {
+	background: rgba(0, 0, 0, 0.06);
+	color: var(--fg, #111);
+}
+
+@media (prefers-color-scheme: dark) {
+	.annotate-tool-btn:hover {
+		background: rgba(255, 255, 255, 0.08);
+		color: #e6e6e6;
+	}
+}
+
+.annotate-tool-btn.active {
+	background: rgba(56, 139, 217, 0.12);
+	color: #388bd9;
+}
+
+.annotate-tool-btn.mode-label {
+	width: auto;
+	padding: 0 10px;
+	font-size: 11px;
+	font-weight: 500;
+	letter-spacing: 0.06em;
+	color: #388bd9;
+	background: rgba(56, 139, 217, 0.1);
+	border: 0.5px solid rgba(56, 139, 217, 0.3);
+	border-radius: 6px;
+	gap: 5px;
+}
+
+.annotate-tool-btn.mode-label:hover {
+	background: rgba(56, 139, 217, 0.18);
+}
+
+.annotate-tool-btn.off {
+	opacity: 0.35;
+}
+
+.annotate-tool-btn.danger:hover {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.12);
+}
+
+/* source panel chip */
+.annotate-source-chip {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	height: 22px;
+	padding: 0 7px 0 6px;
+	background: rgba(0, 0, 0, 0.04);
+	border: 0.5px solid rgba(0, 0, 0, 0.1);
+	border-radius: 5px;
+	font-size: 11px;
+	color: var(--fg-muted, rgba(0, 0, 0, 0.5));
+	cursor: pointer;
+	white-space: nowrap;
+	max-width: 110px;
+	overflow: hidden;
+	transition:
+		border-color 0.1s,
+		color 0.1s;
+}
+
+@media (prefers-color-scheme: dark) {
+	.annotate-source-chip {
+		background: rgba(255, 255, 255, 0.05);
+		border-color: rgba(255, 255, 255, 0.1);
+		color: rgba(255, 255, 255, 0.45);
+	}
+}
+
+.annotate-source-chip:hover {
+	border-color: rgba(220, 60, 60, 0.5);
+	color: #dc3c3c;
+}
+
+.annotate-source-chip-name {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	max-width: 72px;
+}
+
+.annotate-source-chip-x {
+	font-size: 10px;
+	opacity: 0.6;
+	flex-shrink: 0;
+}
+
+/* color swatches */
+.annotate-color-row {
+	display: flex;
+	gap: 3px;
+	padding: 0 2px;
+}
+
+.annotate-swatch {
+	width: 14px;
+	height: 14px;
+	border-radius: 3px;
+	border: 1.5px solid transparent;
+	cursor: pointer;
+	transition:
+		transform 0.1s,
+		border-color 0.1s,
+		box-shadow 0.1s;
+	flex-shrink: 0;
+}
+
+.annotate-swatch:hover {
+	transform: scale(1.2);
+}
+
+.annotate-swatch.active {
+	border-color: #388bd9;
+	box-shadow: 0 0 0 1.5px rgba(56, 139, 217, 0.35);
+	transform: scale(1.15);
+}

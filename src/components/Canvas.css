@@ -23,3 +23,44 @@
   pointer-events: none;
   z-index: 5500;
 }
+
+.canvas-container.annotating {
+  cursor: default;
+}
+.canvas-container.annotating.annotate-freehand,
+.canvas-container.annotating.annotate-arrow,
+.canvas-container.annotating.annotate-rectangle,
+.canvas-container.annotating.annotate-highlight {
+  cursor: crosshair;
+}
+.canvas-container.annotating.annotate-eraser {
+  cursor: default;
+}
+
+.canvas-container.annotating.annotate-freehand .panel,
+.canvas-container.annotating.annotate-arrow .panel,
+.canvas-container.annotating.annotate-rectangle .panel,
+.canvas-container.annotating.annotate-highlight .panel {
+  pointer-events: none;
+}
+
+.canvas-container.annotating.annotate-freehand .anno-sticky,
+.canvas-container.annotating.annotate-arrow .anno-sticky,
+.canvas-container.annotating.annotate-arrow .anno-label,
+.canvas-container.annotating.annotate-rectangle .anno-sticky,
+.canvas-container.annotating.annotate-rectangle .anno-label,
+.canvas-container.annotating.annotate-highlight .anno-sticky,
+.canvas-container.annotating.annotate-highlight .anno-label {
+  pointer-events: none;
+}
+
+/* Let annotation clicks pass through browser webviews during annotate.
+   Webviews are GPU-composited so they can't be visually behind HTML, but
+   pointer-events: none stops them from swallowing canvas clicks. */
+.canvas-container.annotating.annotate-freehand [data-panel-type="browser"],
+.canvas-container.annotating.annotate-arrow [data-panel-type="browser"],
+.canvas-container.annotating.annotate-rectangle [data-panel-type="browser"],
+.canvas-container.annotating.annotate-highlight [data-panel-type="browser"],
+.canvas-container.annotating.annotate-eraser [data-panel-type="browser"] {
+  pointer-events: none;
+}

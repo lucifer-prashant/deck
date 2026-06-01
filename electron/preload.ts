@@ -55,7 +55,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     mkdir: (path: string) => ipcRenderer.invoke('fs:mkdir', path),
     touch: (path: string) => ipcRenderer.invoke('fs:touch', path),
     reveal: (path: string) => ipcRenderer.invoke('shell:reveal', path),
-    trash: (path: string) => ipcRenderer.invoke('shell:trash', path)
+    trash: (path: string) => ipcRenderer.invoke('shell:trash', path),
+    writeAsset: (data: string, filename?: string) => ipcRenderer.invoke('fs:write-asset', { data, filename }),
+    assetDir: () => ipcRenderer.invoke('fs:asset-dir')
   },
   tokens: {
     scan: () => ipcRenderer.invoke('tokens:scan')

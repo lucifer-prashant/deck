@@ -348,6 +348,26 @@
   flex-shrink: 0;
 }
 
+.panel-health-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  cursor: default;
+  transition: background 0.3s;
+}
+.panel-health-dot.health-alive,
+.panel-health-dot.health-loaded { background: #4ade80; }
+.panel-health-dot.health-loading { background: #facc15; }
+.panel-health-dot.health-sleeping { background: #6b7280; }
+.panel-health-dot.health-dead,
+.panel-health-dot.health-crashed { background: #ef4444; cursor: pointer; }
+
+.panel-health-dot.health-dead:hover,
+.panel-health-dot.health-crashed:hover {
+  transform: scale(1.3);
+}
+
 .panel-title {
   font-size: 12.5px;
   color: var(--panel-title, #cccccc);

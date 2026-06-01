@@ -4,6 +4,21 @@ import './HelpOverlay.css'
 
 const SHORTCUTS: Array<{ section: string; items: Array<[string, string]> }> = [
   {
+    section: 'Annotations',
+    items: [
+      ['Toggle annotate mode', 'A'],
+      ['Pen / freehand', '1'],
+      ['Arrow (click port→port)', '2'],
+      ['Rectangle', '3'],
+      ['Highlight', '4'],
+      ['Eraser (drag to sweep)', '5'],
+      ['Toggle visibility', '👁 button in toolbar'],
+      ['Send to back / front', '↓ button in toolbar'],
+      ['Clear drawings', '🗑 button in toolbar'],
+      ['Sticky note / Label', 'Right-click canvas']
+    ]
+  },
+  {
     section: 'Canvas',
     items: [
       ['Pan', 'Scroll · drag empty · middle-click drag'],
@@ -53,8 +68,7 @@ const SHORTCUTS: Array<{ section: string; items: Array<[string, string]> }> = [
       ['Mark canvas saved', 'Ctrl+Alt+S'],
       ['Toggle top bar', 'Ctrl+\\'],
       ['Cycle theme', 'Ctrl+Shift+T'],
-      ['Toggle minimap', 'Map chip'],
-      ['Toggle snap', 'Snap chip']
+      ['Toggle minimap', 'Map chip']
     ]
   }
 ]

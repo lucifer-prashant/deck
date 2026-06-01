@@ -1,98 +1,354 @@
-.anno-sticky {
-  position: absolute;
-  min-width: 140px;
-  min-height: 100px;
-  padding: 6px 8px 8px;
-  border-radius: 6px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.25), 0 1px 0 rgba(255,255,255,0.1) inset;
-  color: #1a1d22;
-  font-family: 'Inter', system-ui, sans-serif;
-  font-size: 12px;
-  cursor: grab;
-  user-select: none;
-  display: flex;
-  flex-direction: column;
-  z-index: 5;
+/* ── Shared positioning behaviour ─────────────────────────── */
+.anno-sticky,
+.anno-label,
+.anno-image {
+	position: absolute;
+	cursor: grab;
+	user-select: none;
+	/* z-index driven by data attribute set on annotation-layer */
+	z-index: 5;
 }
-.anno-sticky:active { cursor: grabbing; }
+[data-anno-behind] .anno-sticky,
+[data-anno-behind] .anno-label,
+[data-anno-behind] .anno-image {
+	z-index: 0;
+}
 
-.anno-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  opacity: 0;
-  transition: opacity 120ms;
+.anno-sticky:active,
+.anno-label:active,
+.anno-image:active {
+	cursor: grabbing;
 }
-.anno-sticky:hover .anno-toolbar { opacity: 1; }
+
+/* ── Sticky note ──────────────────────────────────────────── */
+.anno-sticky {
+	min-width: 160px;
+	min-height: 120px;
+	padding: 0 8px 8px;
+	border-radius: 6px;
+	/* Subtle lift shadow + a very slight top highlight */
+	box-shadow:
+		0 6px 16px rgba(0, 0, 0, 0.28),
+		0 1px 0 rgba(255, 255, 255, 0.18) inset;
+	/* Don't hardcode dark text — let each sticky set color via JS based on bg lightness */
+	font-family: "Inter", system-ui, sans-serif;
+	font-size: 12.5px;
+	line-height: 1.5;
+	display: flex;
+	flex-direction: column;
+	/* Resize from bottom-right */
+	resize: both;
+	overflow: hidden;
+}
+
+/* ── Sticky toolbar ───────────────────────────────────────── */
+.anno-toolbar {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	/* Slightly taller hit area, sits above the text */
+	padding: 5px 0 3px;
+	opacity: 0;
+	/* Faster show, slower hide so you can reach the color row */
+	transition: opacity 80ms ease;
+	flex-shrink: 0;
+}
+.anno-sticky:hover .anno-toolbar,
+.anno-sticky:focus-within .anno-toolbar {
+	opacity: 1;
+}
 
 .anno-btn {
-  width: 18px;
-  height: 18px;
-  border: none;
-  background: rgba(0,0,0,0.06);
-  color: inherit;
-  border-radius: 3px;
-  font-size: 11px;
-  cursor: pointer;
-  font-family: inherit;
-  padding: 0;
+	width: 20px;
+	height: 20px;
+	border: none;
+	background: rgba(0, 0, 0, 0.08);
+	color: inherit;
+	border-radius: 4px;
+	font-size: 13px;
+	line-height: 1;
+	cursor: pointer;
+	font-family: inherit;
+	padding: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	transition: background 80ms;
 }
-.anno-btn:hover { background: rgba(0,0,0,0.14); }
-.anno-btn.danger:hover { background: rgba(220,38,38,0.18); color: #b91c1c; }
+.anno-btn:hover {
+	background: rgba(0, 0, 0, 0.16);
+}
+.anno-btn.danger:hover {
+	background: rgba(185, 28, 28, 0.2);
+	color: #7f1d1d;
+}
 
+/* ── Color swatch row ─────────────────────────────────────── */
 .anno-color-row {
-  display: flex;
-  gap: 3px;
-  padding: 2px 0;
+	display: flex;
+	gap: 4px;
+	padding: 2px 0 4px;
+	flex-shrink: 0;
 }
 .anno-swatch {
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  border: 1px solid rgba(0,0,0,0.15);
-  cursor: pointer;
+	width: 16px;
+	height: 16px;
+	border-radius: 50%;
+	border: 1.5px solid rgba(0, 0, 0, 0.18);
+	cursor: pointer;
+	transition:
+		transform 80ms,
+		box-shadow 80ms;
 }
-.anno-swatch:hover { transform: scale(1.12); }
+.anno-swatch:hover {
+	transform: scale(1.18);
+	box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+}
 
+/* ── Sticky text areas ────────────────────────────────────── */
 .anno-sticky-input {
-  flex: 1;
-  width: 100%;
-  border: none;
-  outline: none;
-  background: transparent;
-  color: inherit;
-  font-family: inherit;
-  font-size: inherit;
-  resize: none;
-  padding: 2px 0;
+	flex: 1;
+	width: 100%;
+	min-height: 60px;
+	border: none;
+	outline: none;
+	background: transparent;
+	color: inherit;
+	font-family: inherit;
+	font-size: inherit;
+	line-height: inherit;
+	resize: none;
+	padding: 2px 0;
 }
 .anno-sticky-text {
-  flex: 1;
-  white-space: pre-wrap;
-  word-wrap: break-word;
-  overflow: hidden;
-  padding: 2px 0;
+	flex: 1;
+	white-space: pre-wrap;
+	word-wrap: break-word;
+	/* Let the resize handle be reachable */
+	overflow: auto;
+	padding: 2px 0;
+	/* Subtle caret hint on hover to signal dbl-click to edit */
+	cursor: text;
+}
+.anno-sticky-text:empty::before {
+	content: "double-click to edit";
+	opacity: 0.35;
 }
 
+/* ── Label ────────────────────────────────────────────────── */
 .anno-label {
-  position: absolute;
-  padding: 2px 8px;
-  font-family: 'Inter', system-ui, sans-serif;
+  padding: 2px 6px;
+  font-family: "Inter", system-ui, sans-serif;
   font-size: 14px;
   font-weight: 500;
-  cursor: grab;
-  user-select: none;
   letter-spacing: 0.01em;
-  z-index: 5;
+  border-radius: 3px;
+  transition: background 80ms;
+  overflow: hidden;
+  white-space: pre-wrap;
+  word-wrap: break-word;
 }
-.anno-label:active { cursor: grabbing; }
+.anno-label:hover {
+	background: rgba(255, 255, 255, 0.07);
+	outline: 1px dashed rgba(255, 255, 255, 0.25);
+	outline-offset: 2px;
+}
+
+.anno-label.anno-selected {
+	background: rgba(77, 171, 232, 0.1);
+	outline: 2px solid rgba(77, 171, 232, 0.5);
+	outline-offset: 2px;
+}
+
+.anno-title {
+  position: absolute;
+  font-size: 9px;
+  font-weight: 500;
+  color: rgba(255,255,255,0.4);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+  pointer-events: none;
+  z-index: 2;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+  line-height: 1;
+}
 .anno-label-input {
-  background: rgba(0,0,0,0.6);
+  background: rgba(0, 0, 0, 0.55);
   color: inherit;
-  border: 1px solid rgba(255,255,255,0.2);
+  border: 1px solid rgba(255, 255, 255, 0.22);
   border-radius: 4px;
   padding: 2px 8px;
   font-size: inherit;
+  font-weight: inherit;
   font-family: inherit;
+  letter-spacing: inherit;
   outline: none;
+  min-width: 80px;
+  resize: none;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+/* ── Image annotation ─────────────────────────────────────── */
+.anno-image {
+	border-radius: 4px;
+	overflow: hidden;
+	box-shadow: 0 2px 10px rgba(0, 0, 0, 0.28);
+	border: 1.5px solid rgba(255, 255, 255, 0.06);
+	transition:
+		border-color 80ms,
+		box-shadow 80ms;
+}
+.anno-image:hover {
+  border-color: rgba(77, 171, 232, 0.45);
+  box-shadow:
+    0 2px 10px rgba(0, 0, 0, 0.28),
+    0 0 0 1px rgba(77, 171, 232, 0.2);
+}
+
+.anno-image.anno-selected {
+  border-color: rgba(77, 171, 232, 0.65);
+  box-shadow:
+    0 2px 10px rgba(0, 0, 0, 0.28),
+    0 0 0 2px rgba(77, 171, 232, 0.35);
+}
+
+.anno-resize-handle {
+  position: absolute;
+  z-index: 6;
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+.anno-image:hover .anno-resize-handle,
+.anno-label:hover .anno-resize-handle,
+.anno-selected .anno-resize-handle {
+  opacity: 1;
+}
+.anno-resize-handle:hover {
+  background: rgba(77, 171, 232, 0.5);
+}
+.anno-image:hover .anno-resize-handle,
+.anno-label:hover .anno-resize-handle,
+.anno-selected .anno-resize-handle {
+  opacity: 1;
+}
+
+.anno-resize-n, .anno-resize-s { left: 6px; right: 6px; height: 12px; cursor: ns-resize; }
+.anno-resize-n { top: -8px; }
+.anno-resize-s { bottom: -8px; }
+
+.anno-resize-e, .anno-resize-w { top: 6px; bottom: 6px; width: 12px; cursor: ew-resize; }
+.anno-resize-e { right: -8px; }
+.anno-resize-w { left: -8px; }
+
+.anno-resize-ne, .anno-resize-nw, .anno-resize-se, .anno-resize-sw {
+  width: 18px; height: 18px; border-radius: 3px;
+}
+.anno-resize-ne { top: -9px; right: -9px; cursor: nesw-resize; }
+.anno-resize-nw { top: -9px; left: -9px; cursor: nwse-resize; }
+.anno-resize-se { bottom: -9px; right: -9px; cursor: nwse-resize; }
+.anno-resize-sw { bottom: -9px; left: -9px; cursor: nesw-resize; }
+
+.anno-selected .anno-resize-ne,
+.anno-selected .anno-resize-nw,
+.anno-selected .anno-resize-se,
+.anno-selected .anno-resize-sw {
+  background: rgba(77, 171, 232, 0.35);
+  border: 1.5px solid rgba(77, 171, 232, 0.7);
+}
+
+.anno-color-picker {
+  position: fixed;
+  z-index: 10001;
+  display: flex;
+  gap: 4px;
+  padding: 5px 7px;
+  background: rgba(22, 24, 28, 0.95);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.45);
+  animation: ctx-pop 0.06s ease-out;
+}
+
+.anno-border-swatch {
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  border: 2px solid rgba(255,255,255,0.15);
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  transition: transform 0.08s, border-color 0.08s;
+}
+.anno-border-swatch:hover { transform: scale(1.15); border-color: rgba(255,255,255,0.4); }
+.anno-border-swatch.active { border-color: #4dabe8; box-shadow: 0 0 0 2px rgba(77, 171, 232, 0.3); }
+
+.anno-border-swatch span {
+  display: block;
+  width: 14px;
+  height: 14px;
+  border-radius: 2px;
+}
+.anno-border-none {
+  color: rgba(255,255,255,0.4);
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.anno-picker-sep {
+  height: 1px;
+  background: rgba(255,255,255,0.08);
+  margin: 2px 0;
+}
+
+.anno-picker-rename {
+  display: block;
+  width: 100%;
+  padding: 3px 6px;
+  border: none;
+  border-radius: 4px;
+  background: rgba(255,255,255,0.05);
+  color: rgba(255,255,255,0.5);
+  font-size: 10px;
+  cursor: pointer;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.anno-picker-rename:hover {
+  background: rgba(255,255,255,0.1);
+  color: #fff;
+}
+
+.anno-picker-rename-input {
+  width: 100%;
+  padding: 3px 6px;
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 4px;
+  background: rgba(0,0,0,0.3);
+  color: #fff;
+  font-size: 10px;
+  outline: none;
+  box-sizing: border-box;
+}
+.anno-picker-rename-input:focus {
+  border-color: rgba(77, 171, 232, 0.6);
+}
+
+.jump-highlight {
+  outline: 2px solid rgba(255, 255, 255, 0.55) !important;
+  outline-offset: 3px;
+  box-shadow: 0 0 10px rgba(255, 255, 255, 0.15);
+}
+
+.anno-image.has-border,
+.anno-label.has-border {
+  outline: 1.5px solid var(--border-color);
+  outline-offset: -0.5px;
 }

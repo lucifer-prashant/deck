@@ -94,3 +94,35 @@
 .ctx-swatch.active {
   box-shadow: 0 0 0 2px #fff inset, 0 0 0 1px rgba(0,0,0,0.6);
 }
+
+.ctx-submenu-trigger {
+  position: relative;
+}
+
+.ctx-sub-arrow {
+  font-size: 11px;
+  color: rgba(255,255,255,0.35);
+}
+
+.ctx-submenu-trigger.sub-open > span:first-child,
+.ctx-submenu-trigger.sub-open .ctx-sub-arrow {
+  color: #fff;
+}
+
+.ctx-submenu {
+  position: absolute;
+  left: calc(100% + 4px);
+  top: -6px;
+  min-width: 200px;
+  background: var(--menu-bg, rgba(28, 30, 34, 0.98));
+  border: 1px solid var(--menu-border, rgba(255,255,255,0.12));
+  border-radius: 8px;
+  padding: 6px;
+  box-shadow: 0 14px 40px rgba(0,0,0,0.5);
+  backdrop-filter: blur(14px);
+  animation: ctx-pop 0.06s ease-out;
+}
+
+.ctx-submenu .ctx-sep {
+  margin: 3px 2px;
+}

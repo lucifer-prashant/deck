@@ -11,7 +11,7 @@ import EmptyState from './components/EmptyState'
 import JumpOverlay from './components/JumpOverlay'
 import PopoutWindow from './components/PopoutWindow'
 import { useWorkspaceStore } from './store/workspaceStore'
-import { executeWorkspaceCommand, WorkspaceCommand, fitPanelsToViewport } from './workspaceCommands'
+import { executeWorkspaceCommand, WorkspaceCommand, fitItemsToViewport } from './workspaceCommands'
 import './App.css'
 
 const JUMP_LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
@@ -42,7 +42,8 @@ function MainAppShell() {
     selectPanel,
     setViewport,
     chromeVisible,
-    toggleChrome
+    toggleChrome,
+    toggleAnnotateMode
   } = useWorkspaceStore()
 
   useEffect(() => { initialize() }, [initialize])
@@ -177,6 +178,22 @@ function MainAppShell() {
           if (s.selectedPanelIds.length > 0) s.clearSelection()
           return
         }
+
+        // Nothing else to clear — clear annotation selection, or exit annotate mode.
+        if (s.selectedAnnotationIds.length > 0) {
+          e.preventDefault()
+          e.stopPropagation()
+          e.stopImmediatePropagation()
+          s.clearAnnotationSelection()
+          return
+        }
+        if (s.annotateMode) {
+          e.preventDefault()
+          e.stopPropagation()
+          e.stopImmediatePropagation()
+          s.toggleAnnotateMode()
+          return
+        }
       }
 
       // ---- Enter on a single selected panel (header context) → focus into body ----
@@ -230,7 +247,8 @@ function MainAppShell() {
           const pid = liveJump.letters[letter]
           if (pid) {
             e.preventDefault()
-            const p = useWorkspaceStore.getState().panels[pid]
+            const s = useWorkspaceStore.getState()
+            const p = s.panels[pid]
             if (p) {
               window.dispatchEvent(new CustomEvent('wts-smooth-viewport'))
               const zoom = 1
@@ -240,6 +258,21 @@ function MainAppShell() {
                 y: window.innerHeight / 2 - (p.y + p.height / 2) * zoom
               })
               selectPanel(pid)
+            } else {
+              // Annotation — look in current tab's annotations.
+              const tab = s.tabs.find(t => t.id === s.activeTabId)
+              const a = tab?.annotations?.find(aa => aa.id === pid)
+              if (a) {
+                window.dispatchEvent(new CustomEvent('wts-smooth-viewport'))
+                const ax = a.x + (a.width || 100) / 2
+                const ay = a.y + (a.height || 24) / 2
+                setViewport({
+                  zoom: 1,
+                  x: window.innerWidth / 2 - ax,
+                  y: window.innerHeight / 2 - ay
+                })
+                s.selectAnnotation(pid)
+              }
             }
             setJumpMode(false)
             return
@@ -250,19 +283,26 @@ function MainAppShell() {
         return
       }
 
-      // Tab → enter jump mode (only when not typing, no modifier, panels exist).
+      // Tab → enter jump mode (only when not typing, no modifier, items exist).
       if (!isTextInput && e.key === 'Tab' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
-        const all = Object.values(useWorkspaceStore.getState().panels)
-          .filter(p => p.type !== 'region')
-          .sort((a, b) => a.y - b.y || a.x - b.x)
+        const state = useWorkspaceStore.getState()
+        const panels = Object.values(state.panels).filter(p => p.type !== 'region')
+        const tab = state.tabs.find(t => t.id === state.activeTabId)
+        const annos = (tab?.annotations || []).filter(a =>
+          a.type === 'sticky' || a.type === 'label' || a.type === 'image'
+        )
+        type JumpItem = { id: string; x: number; y: number; width: number; height: number; kind: 'panel' | 'anno' }
+        const all: JumpItem[] = [
+          ...panels.map(p => ({ id: p.id, x: p.x, y: p.y, width: p.width, height: p.height, kind: 'panel' as const })),
+          ...annos.map(a => ({ id: a.id, x: a.x, y: a.y, width: a.width || 100, height: a.height || 24, kind: 'anno' as const })),
+        ].sort((a, b) => a.y - b.y || a.x - b.x)
+
         if (all.length > 0) {
           e.preventDefault()
-          // Fit first (smooth fly-out). Letters appear after transition settles
-          // so they don't desync from panels animating into position.
-          fitPanelsToViewport(all)
+          fitItemsToViewport(all)
           const letters: Record<string, string> = {}
-          all.slice(0, JUMP_LETTERS.length).forEach((p, i) => {
-            letters[JUMP_LETTERS[i]] = p.id
+          all.slice(0, JUMP_LETTERS.length).forEach((item, i) => {
+            letters[JUMP_LETTERS[i]] = item.id
           })
           window.setTimeout(() => {
             const stillThere = useWorkspaceStore.getState()
@@ -374,10 +414,16 @@ function MainAppShell() {
         }
       }
 
-      // Number 1-9 (no modifier) → switch to tab N.
+      // Number 1-9 (no modifier) → switch to tab N. 1-6 in annotate mode → switch tool.
       if (!isTextInput && !e.ctrlKey && !e.metaKey && !e.altKey && /^[1-9]$/.test(e.key)) {
         const idx = parseInt(e.key, 10) - 1
         const state = useWorkspaceStore.getState()
+        if (state.annotateMode && idx < 5) {
+          const tools = ['freehand', 'arrow', 'rectangle', 'highlight', 'eraser'] as const
+          e.preventDefault()
+          state.setAnnotateTool(tools[idx])
+          return
+        }
         if (state.tabs[idx]) {
           e.preventDefault()
           state.switchTab(state.tabs[idx].id)
@@ -471,6 +517,11 @@ function MainAppShell() {
           toggleMinimap()
           return
         }
+        if (e.key === 'a' || e.key === 'A') {
+          e.preventDefault()
+          toggleAnnotateMode()
+          return
+        }
       }
 
       if (!(e.metaKey || e.ctrlKey) || e.altKey) return
@@ -506,6 +557,8 @@ function MainAppShell() {
         e.preventDefault(); useWorkspaceStore.getState().loadPreset('life')
       } else if (k === 'k' && e.shiftKey) {
         e.preventDefault(); useWorkspaceStore.getState().loadPreset('no-life')
+      } else if (k === ' ' && e.shiftKey) {
+        e.preventDefault(); useWorkspaceStore.getState().findOrCreateScratchpad()
       }
     }
 
@@ -513,12 +566,12 @@ function MainAppShell() {
     window.addEventListener('keydown', handleKeyDown, true)
     return () => window.removeEventListener('keydown', handleKeyDown, true)
   // panels/selectedPanelIds/updatePanel/jumpMode omitted — handler reads live state via getState()
-  }, [toggleCommandPalette, togglePanelFinder, toggleOutliner, toggleHelp, cycleTheme, undo, redo, toggleMinimap, setJumpMode, selectPanel, setViewport, toggleChrome])
+  }, [toggleCommandPalette, togglePanelFinder, toggleOutliner, toggleHelp, cycleTheme, undo, redo, toggleMinimap, setJumpMode, selectPanel, setViewport, toggleChrome, toggleAnnotateMode])
 
   useEffect(() => {
     const validCommands = new Set<WorkspaceCommand>([
       'new-terminal', 'new-editor', 'new-note', 'new-tab', 'new-browser', 'new-region',
-      'clear-selection', 'clear-canvas', 'toggle-minimap', 'toggle-snap',
+      'clear-selection', 'clear-canvas', 'toggle-minimap',
       'select-all', 'duplicate-selected', 'fit-all', 'reset-viewport', 'zoom-in', 'zoom-out',
       'align-left', 'align-top', 'align-right', 'align-bottom',
       'distribute-horizontal', 'distribute-vertical',

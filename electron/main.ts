@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, ipcMain, dialog, shell, session } from 'electron'
+import { app, BrowserWindow, Menu, ipcMain, dialog, shell, session, protocol } from 'electron'
 import { join, basename, dirname } from 'path'
 import { homedir } from 'os'
 import { promises as fsp, existsSync } from 'fs'
@@ -109,7 +109,6 @@ function buildMenu() {
         { label: 'Reset Zoom',         accelerator: 'CmdOrCtrl+Alt+0',  click: () => zoom('reset') },
         { type: 'separator' },
         { label: 'Toggle Minimap',                                       click: () => send('toggle-minimap') },
-        { label: 'Toggle Snap to Grid',                                  click: () => send('toggle-snap') },
         { type: 'separator' },
         { label: 'Reload',             accelerator: 'CmdOrCtrl+R',      role: 'reload' },
         { label: 'Toggle DevTools',    accelerator: 'F12',              role: 'toggleDevTools' },
@@ -319,6 +318,18 @@ app.whenReady().then(async () => {
   try {
     await session.fromPartition('persist:wts-code-server').clearStorageData({ storages: ['serviceworkers'] })
   } catch { /* non-fatal */ }
+  protocol.handle('deck-asset', async (req) => {
+    const filename = req.url.replace('deck-asset://', '')
+    const filepath = join(app.getPath('userData'), 'assets', filename)
+    try {
+      const data = await fsp.readFile(filepath)
+      const ext = filename.split('.').pop()?.toLowerCase() || 'png'
+      const mime = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml' }[ext] || 'image/png'
+      return new Response(data, { headers: { 'content-type': mime } })
+    } catch {
+      return new Response('', { status: 404 })
+    }
+  })
   // Set process icon for taskbar/app-switcher on Linux (BrowserWindow icon option
   // only affects the window chrome; app.setIcon covers the taskbar tile).
   if (process.platform === 'linux') {
@@ -539,6 +550,23 @@ ipcMain.handle('fs:walk-up', async (_e, args: { start: string; markers: string[]
 })
 
 ipcMain.handle('fs:home', () => homedir())
+
+ipcMain.handle('fs:write-asset', async (_e, args: { data: string; filename?: string }) => {
+  try {
+    const assetsDir = join(app.getPath('userData'), 'assets')
+    await fsp.mkdir(assetsDir, { recursive: true })
+    const ext = args.filename ? '.' + (args.filename.split('.').pop() || 'png') : 'png'
+    const name = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`
+    const filepath = join(assetsDir, name)
+    const buffer = Buffer.from(args.data, 'base64')
+    await fsp.writeFile(filepath, buffer)
+    return { ok: true, filename: name, path: filepath }
+  } catch (err) {
+    return { ok: false, error: (err as Error).message }
+  }
+})
+
+ipcMain.handle('fs:asset-dir', () => join(app.getPath('userData'), 'assets'))
 
 // ---- token usage scanner ----
 // Walks local agent log dirs, parses JSONL, aggregates by tool/model/project/day.

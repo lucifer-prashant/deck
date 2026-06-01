@@ -13,7 +13,6 @@ const WorkspaceChrome: React.FC = () => {
     viewport,
     selectedPanelIds,
     minimapVisible,
-    snapToGrid,
     sidebarOpen,
     theme,
     createTab,
@@ -93,6 +92,10 @@ const WorkspaceChrome: React.FC = () => {
   const confirmCloseTab = useCallback((id: string) => {
     const t = tabs.find(x => x.id === id)
     if (!t) return
+    if (t.kind === 'scratchpad') {
+      closeTab(id)
+      return
+    }
     const count = Object.keys(t.panels).length
     if (count > 0) {
       const dirty = t.lastEditedAt && t.lastEditedAt > (t.lastSavedAt || 0)
@@ -129,7 +132,7 @@ const WorkspaceChrome: React.FC = () => {
       if (!ok) return
     }
     closeTab(id)
-  }, [tabs, closeTab, canvasPresets, overwriteCanvasPreset, saveCanvasPreset, markTabSaved])
+  }, [tabs, closeTab, canvasPresets, overwriteCanvasPreset, saveCanvasPreset, saveBuiltinPreset, markTabSaved])
 
   const handleExport = () => {
     const json = exportWorkspace()
@@ -184,7 +187,7 @@ const WorkspaceChrome: React.FC = () => {
             return (
               <div
                 key={tab.id}
-                className={`workspace-tab ${tab.id === activeTabId ? 'active' : ''} ${dragTabId === tab.id ? 'dragging' : ''}`}
+                className={`workspace-tab ${tab.id === activeTabId ? 'active' : ''} ${dragTabId === tab.id ? 'dragging' : ''} ${tab.kind === 'scratchpad' ? 'scratchpad-tab' : ''}`}
                 onClick={() => tab.id !== activeTabId && switchTab(tab.id)}
                 onDoubleClick={() => beginTabRename(tab.id, tab.title)}
                 onContextMenu={(e) => {
@@ -256,7 +259,6 @@ const WorkspaceChrome: React.FC = () => {
 
         <button className="chrome-chip" onClick={toggleCommandPalette} title="Command palette (Ctrl+P)">⌘ P</button>
         <button className="chrome-chip" onClick={() => executeWorkspaceCommand('fit-all')} title="Fit all panels">Fit</button>
-        <button className={`chrome-chip ${snapToGrid ? 'active' : ''}`} onClick={() => executeWorkspaceCommand('toggle-snap')}>Snap</button>
         <button className={`chrome-chip ${minimapVisible ? 'active' : ''}`} onClick={() => executeWorkspaceCommand('toggle-minimap')}>Map</button>
         <div className="workspace-tab-divider" />
         <button className="chrome-chip ghost" onClick={handleImportClick} title="Import workspace JSON">⬆</button>

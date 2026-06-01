@@ -119,6 +119,7 @@ export interface Panel {
   repoRoot?: string
   folderPath?: string
   notePath?: string
+  healthState?: 'alive' | 'loading' | 'sleeping' | 'loaded' | 'dead' | 'crashed'
 }
 
 export type SidebarSection = 'explorer' | 'git' | 'tokens' | 'notes' | 'outline'
@@ -129,15 +130,53 @@ export interface Viewport {
   zoom: number
 }
 
+export type AnnotationType = 'sticky' | 'label' | 'freehand' | 'arrow' | 'rectangle' | 'highlight' | 'relationship' | 'image'
+
+export interface Point { x: number; y: number }
+
 export interface Annotation {
   id: string
-  type: 'sticky' | 'label'
+  type: AnnotationType
   x: number
   y: number
   width: number
   height: number
   text: string
-  color: string  // CSS color or empty for default
+  color: string
+  title?: string  // display name for search / finder — auto-generated if not set
+  // Freehand — array of strokes, each stroke is a polyline of points.
+  pathData?: Point[][]
+  strokeWidth?: number
+  // Arrow (drawing tool) — anchored or free.
+  startX?: number
+  startY?: number
+  endX?: number
+  endY?: number
+  startPanelId?: string
+  endPanelId?: string
+  startAnchor?: 'top' | 'bottom' | 'left' | 'right' | 'center'
+  endAnchor?: 'top' | 'bottom' | 'left' | 'right' | 'center'
+  startEdgePos?: number  // 0–1 position along the edge
+  endEdgePos?: number
+  dashed?: boolean
+  arrowLabel?: string
+  // Rectangle
+  strokeColor?: string
+  // Highlight
+  fillOpacity?: number
+  // Relationship (semantic link between two panels)
+  sourcePanelId?: string
+  targetPanelId?: string
+  sourceAnchor?: 'top' | 'bottom' | 'left' | 'right' | 'center'
+  targetAnchor?: 'top' | 'bottom' | 'left' | 'right' | 'center'
+  sourceEdgePos?: number
+  targetEdgePos?: number
+  relationshipLabel?: string
+  broken?: boolean
+  curved?: boolean  // false = straight line, default = curved bezier
+  fontSize?: number // text label font size in px
+  // Image
+  filename?: string
 }
 
 export interface WorkspaceTab {
@@ -154,7 +193,7 @@ export interface WorkspaceTab {
   // Marks this tab as belonging to a preset. Survives renames. Used so closing/deleting
   // panels in a preset can be tracked in `presetGraveyards` and re-restored next time
   // the user loads the preset.
-  kind?: 'preset:life' | 'preset:no-life'
+  kind?: 'preset:life' | 'preset:no-life' | 'scratchpad'
   // Id of a user-saved CanvasPreset. Set when the tab was created via loadCanvasPreset
   // or when the user saves the current canvas via saveCanvasPreset. Used to overwrite
   // the preset on Ctrl+S / "Save" without prompting for a name again.
@@ -173,6 +212,7 @@ export interface CanvasPreset {
   name: string
   savedAt: number
   panels: Record<string, Panel>
+  annotations?: Annotation[]
   viewport: Viewport
 }
 
@@ -199,6 +239,7 @@ export interface WorkspaceState {
   panelFinderOpen: boolean
   globalSearchOpen: boolean
   settingsOpen: boolean
+  selectedAnnotationIds: string[]
   renameRequestId: string | null  // bumped when Canvas/App wants a panel to enter inline rename
   stackDropTargetId: string | null  // panel id whose header is currently a drop target during a stack-drag
   prefs: {
@@ -209,7 +250,6 @@ export interface WorkspaceState {
     showCursorReadout: boolean
   }
   minimapVisible: boolean
-  snapToGrid: boolean
   outlinerOpen: boolean
   helpOpen: boolean
   statusBarVisible: boolean
@@ -232,6 +272,14 @@ export interface WorkspaceState {
   // Per-section pin: when set, that section ignores active-panel changes and stays on its pinned target.
   sidebarPin: { explorer?: string; git?: string }
   hiddenSidebarSections: SidebarSection[]
+  // Annotate mode — lock panels and enable drawing tools.
+  annotateMode: boolean
+  annotateTool: AnnotationType | 'eraser' | 'select'
+  annotationsVisible: boolean
+  drawColor: string
+  drawStrokeWidth: number
+  annotateSourcePanelId: string | null
+  annotationsBehindPanels: boolean
 
   setHeaderActivePanel: (id: string | null) => void
   setBodyActivePanel: (id: string | null) => void
@@ -257,7 +305,6 @@ export interface WorkspaceState {
   requestRename: (id: string | null) => void
   setPanelFinderOpen: (open: boolean) => void
   toggleMinimap: () => void
-  toggleSnapToGrid: () => void
   toggleOutliner: () => void
   toggleHelp: () => void
   toggleStatusBar: () => void
@@ -284,6 +331,17 @@ export interface WorkspaceState {
   addAnnotation: (a: Annotation) => void
   updateAnnotation: (id: string, updates: Partial<Annotation>) => void
   deleteAnnotation: (id: string) => void
+  selectAnnotation: (id: string) => void
+  selectMultipleAnnotations: (ids: string[]) => void
+  clearAnnotationSelection: () => void
+  // Annotate mode controls.
+  toggleAnnotateMode: () => void
+  setAnnotateTool: (tool: WorkspaceState['annotateTool']) => void
+  toggleAnnotationsVisible: () => void
+  setDrawColor: (color: string) => void
+  setDrawStrokeWidth: (width: number) => void
+  setAnnotateSourcePanel: (id: string | null) => void
+  toggleAnnotationsBehindPanels: () => void
   groupIntoRegion: (panelIds: string[], regionName: string) => string
   ungroupRegion: (regionId: string) => void
   updateRegionMembership: (panelIds: string[]) => void
@@ -307,6 +365,7 @@ export interface WorkspaceState {
   overwriteCanvasPreset: (id: string) => void
   loadCanvasPreset: (id: string) => void
   deleteCanvasPreset: (id: string) => void
+  findOrCreateScratchpad: () => void
 }
 
 const createEmptyTab = (title = 'Canvas'): WorkspaceTab => ({
@@ -347,11 +406,11 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       panelFinderOpen: false,
       globalSearchOpen: false,
       settingsOpen: false,
+      selectedAnnotationIds: [],
       renameRequestId: null,
       stackDropTargetId: null,
       prefs: { fontSize: 13, density: 'cozy', animations: true, snapStep: 20, showCursorReadout: true },
       minimapVisible: true,
-      snapToGrid: false,
       outlinerOpen: false,
       helpOpen: false,
       statusBarVisible: true,
@@ -371,6 +430,13 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       hiddenSidebarSections: [],
       presetGraveyards: {},
       canvasPresets: {},
+      annotateMode: false,
+      annotateTool: 'freehand',
+      annotationsVisible: true,
+      drawColor: '#ffffff',
+      drawStrokeWidth: 2,
+      annotateSourcePanelId: null,
+      annotationsBehindPanels: false,
 
       setHeaderActivePanel: (id) => set({ headerActivePanelId: id }),
       setBodyActivePanel: (id) => set(state => {
@@ -534,7 +600,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           // should keep following the previously focused real panel.
           const target = state.panels[id]
           const nextLastFocused = target?.type === 'region' ? state.lastFocusedPanelId : id
-          return { selectedPanelIds, headerActivePanelId, bodyActivePanelId, lastFocusedPanelId: nextLastFocused, ...syncActiveTab(state, { selectedPanelIds }) }
+          return { selectedPanelIds, headerActivePanelId, bodyActivePanelId, lastFocusedPanelId: nextLastFocused, selectedAnnotationIds: additive ? state.selectedAnnotationIds : [], ...syncActiveTab(state, { selectedPanelIds }) }
         }),
 
       selectMultiple: (ids) => set((state) => ({ selectedPanelIds: ids, headerActivePanelId: null, bodyActivePanelId: null, ...syncActiveTab(state, { selectedPanelIds: ids }) })),
@@ -557,7 +623,6 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       requestRename: (id) => set({ renameRequestId: id }),
       setPanelFinderOpen: (open) => set({ panelFinderOpen: open }),
       toggleMinimap: () => set((state) => ({ minimapVisible: !state.minimapVisible })),
-      toggleSnapToGrid: () => set((state) => ({ snapToGrid: !state.snapToGrid })),
       toggleOutliner: () => set((state) => ({ outlinerOpen: !state.outlinerOpen })),
       toggleHelp: () => set((state) => ({ helpOpen: !state.helpOpen })),
       toggleStatusBar: () => set((state) => ({ statusBarVisible: !state.statusBarVisible })),
@@ -791,7 +856,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
 
           // Closing a preset tab: snapshot ALL of its panels to the graveyard so
           // re-loading the preset can resurrect them at their last-known state.
-          let presetGraveyards = state.presetGraveyards
+          const presetGraveyards = state.presetGraveyards
           // Intentionally NOT writing graveyard on tab close — graveyard only updates
           // on explicit Ctrl+S (saveBuiltinPreset) or panel delete. Closing without
           // saving should revert to last explicitly saved state.
@@ -886,8 +951,8 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       movePanel: (id, x, y) =>
         set((state) => {
           if (!state.panels[id] || state.panels[id].locked) return state
-          const nx = state.snapToGrid ? Math.round(x / 20) * 20 : x
-          const ny = state.snapToGrid ? Math.round(y / 20) * 20 : y
+          const nx = x
+          const ny = y
           const panel = state.panels[id]
           const dx = nx - panel.x
           const dy = ny - panel.y
@@ -932,8 +997,24 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           t.id === state.activeTabId
             ? { ...t, annotations: (t.annotations || []).filter(a => a.id !== id), lastEditedAt: Date.now() }
             : t
-        )
+        ),
+        selectedAnnotationIds: state.selectedAnnotationIds.filter(aid => aid !== id)
       })),
+
+      selectAnnotation: (id) => set({ selectedAnnotationIds: [id] }),
+      selectMultipleAnnotations: (ids) => set({ selectedAnnotationIds: ids }),
+      clearAnnotationSelection: () => set({ selectedAnnotationIds: [] }),
+
+      toggleAnnotateMode: () => set(state => ({
+        annotateMode: !state.annotateMode,
+        annotateTool: state.annotateMode ? state.annotateTool : 'select'
+      })),
+      setAnnotateTool: (tool) => set({ annotateTool: tool }),
+      toggleAnnotationsVisible: () => set(state => ({ annotationsVisible: !state.annotationsVisible })),
+      setDrawColor: (color) => set({ drawColor: color }),
+      setDrawStrokeWidth: (width) => set({ drawStrokeWidth: width }),
+      setAnnotateSourcePanel: (id) => set({ annotateSourcePanelId: id }),
+      toggleAnnotationsBehindPanels: () => set(s => ({ annotationsBehindPanels: !s.annotationsBehindPanels })),
 
       groupIntoRegion: (panelIds, regionName) => {
         const state = get()
@@ -1217,6 +1298,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           name: name.trim() || 'Untitled',
           savedAt: Date.now(),
           panels: state.panels,
+          annotations: state.tabs.find(t => t.id === state.activeTabId)?.annotations,
           viewport: state.viewport
         }
         set(s => ({
@@ -1230,7 +1312,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         const state = get()
         const preset = state.canvasPresets[id]
         if (!preset) return
-        const updated: CanvasPreset = { ...preset, savedAt: Date.now(), panels: state.panels, viewport: state.viewport }
+        const updated: CanvasPreset = { ...preset, savedAt: Date.now(), panels: state.panels, annotations: state.tabs.find(t => t.id === state.activeTabId)?.annotations, viewport: state.viewport }
         set(s => ({ canvasPresets: { ...s.canvasPresets, [id]: updated } }))
       },
 
@@ -1249,6 +1331,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           id: `tab-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
           title: preset.name,
           panels,
+          annotations: preset.annotations ? [...preset.annotations] : undefined,
           viewport: preset.viewport,
           selectedPanelIds: [],
           createdAt: Date.now(),
@@ -1270,6 +1353,27 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         delete next[id]
         return { canvasPresets: next }
       }),
+
+      findOrCreateScratchpad: () => {
+        const state = get()
+        const existing = state.tabs.find(t => t.kind === 'scratchpad')
+        if (existing) {
+          set({ activeTabId: existing.id, panels: existing.panels, viewport: existing.viewport, selectedPanelIds: [] })
+          return
+        }
+        const tab = createEmptyTab('Scratchpad')
+        tab.kind = 'scratchpad'
+        tab.color = '#6b7280'
+        set(state2 => ({
+          tabs: [...state2.tabs, tab],
+          activeTabId: tab.id,
+          panels: {},
+          viewport: { x: 0, y: 0, zoom: 1 },
+          selectedPanelIds: [],
+          past: [],
+          future: []
+        }))
+      },
 
       movePanelToTab: (panelId, toTabId) => set(state => {
         if (toTabId === state.activeTabId) return state
@@ -1370,31 +1474,35 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       name: 'worktree-studio-workspace',
       storage: createJSONStorage(() => dualStorage),
       version: 4,
-      partialize: (state) => ({
-        panels: state.panels,
-        viewport: state.viewport,
-        tabs: state.tabs,
-        activeTabId: state.activeTabId,
-        projectId: state.projectId,
-        minimapVisible: state.minimapVisible,
-        snapToGrid: state.snapToGrid,
-        outlinerOpen: state.outlinerOpen,
-        statusBarVisible: state.statusBarVisible,
-        chromeVisible: state.chromeVisible,
-        theme: state.theme,
-        sidebarOpen: state.sidebarOpen,
-        sidebarSection: state.sidebarSection,
-        sidebarPin: state.sidebarPin,
-        hiddenSidebarSections: state.hiddenSidebarSections,
-        prefs: state.prefs,
-        presetGraveyards: state.presetGraveyards,
-        canvasPresets: state.canvasPresets
-      }),
-      // v2: scrub retired gold/amber colors. v3: force snapToGrid off. v4: add canvasPresets.
+      partialize: (state) => {
+        const nonScratchTabs = state.tabs.filter(t => t.kind !== 'scratchpad')
+        const activeIsScratch = state.tabs.find(t => t.id === state.activeTabId)?.kind === 'scratchpad'
+        return {
+          panels: state.panels,
+          viewport: state.viewport,
+          tabs: nonScratchTabs,
+          activeTabId: activeIsScratch ? (nonScratchTabs[0]?.id || state.activeTabId) : state.activeTabId,
+          projectId: state.projectId,
+          minimapVisible: state.minimapVisible,
+          outlinerOpen: state.outlinerOpen,
+          statusBarVisible: state.statusBarVisible,
+          chromeVisible: state.chromeVisible,
+          theme: state.theme,
+          sidebarOpen: state.sidebarOpen,
+          sidebarSection: state.sidebarSection,
+          sidebarPin: state.sidebarPin,
+          hiddenSidebarSections: state.hiddenSidebarSections,
+          prefs: state.prefs,
+          presetGraveyards: state.presetGraveyards,
+          canvasPresets: state.canvasPresets,
+          annotationsVisible: state.annotationsVisible
+        }
+      },
+      // v2: scrub retired gold/amber colors. v3: force snapToGrid off. v4: add canvasPresets. v5: snapToGrid removed.
       migrate: (persisted: unknown) => {
         const RETIRED = new Set(['#d4a017', '#ffd36a', '#ffc517', '#ffbd2e'])
         const scrub = (c?: string) => (c && RETIRED.has(c.toLowerCase()) ? '' : c)
-        const data = persisted as { panels?: Record<string, Panel>; tabs?: WorkspaceTab[]; snapToGrid?: boolean; canvasPresets?: Record<string, CanvasPreset> }
+        const data = persisted as { panels?: Record<string, Panel>; tabs?: WorkspaceTab[]; canvasPresets?: Record<string, CanvasPreset> }
         if (data?.panels) {
           Object.values(data.panels).forEach(p => { if (p.color) p.color = scrub(p.color) })
         }
@@ -1404,7 +1512,6 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             if (t.panels) Object.values(t.panels).forEach(p => { if (p.color) p.color = scrub(p.color) })
           })
         }
-        if (data) data.snapToGrid = false
         if (data && !data.canvasPresets) data.canvasPresets = {}
         return data as WorkspaceState
       }

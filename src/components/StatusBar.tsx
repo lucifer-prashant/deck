@@ -10,10 +10,8 @@ const StatusBar: React.FC = () => {
     panels,
     selectedPanelIds,
     viewport,
-    snapToGrid,
     theme,
     statusBarVisible,
-    toggleSnapToGrid,
     toggleHelp,
     loadPreset
   } = useWorkspaceStore()
@@ -85,9 +83,6 @@ const StatusBar: React.FC = () => {
       </div>
       <div className="status-right">
         <button className="status-chip ghost" onClick={() => executeWorkspaceCommand('fit-all')}>fit</button>
-        <button className={`status-chip toggle ${snapToGrid ? 'on' : ''}`} onClick={toggleSnapToGrid} title="Snap to grid">
-          snap
-        </button>
         <button
           className="status-chip ghost"
           onClick={(e) => {

@@ -107,6 +107,15 @@
   opacity: 0.5;
 }
 
+.workspace-tab.scratchpad-tab {
+  border-style: dashed;
+  background: rgba(107, 114, 128, 0.12);
+}
+.workspace-tab.scratchpad-tab.active {
+  border-style: dashed;
+  background: rgba(107, 114, 128, 0.22);
+}
+
 .workspace-tab.add {
   min-width: 32px;
   width: 32px;

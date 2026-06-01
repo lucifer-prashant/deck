@@ -5,6 +5,8 @@ import Minimap from './Minimap'
 import CanvasContextMenu from './CanvasContextMenu'
 import { confirmPanelsDeletion } from '../panelDeletion'
 import AnnotationLayer from './AnnotationLayer'
+import DrawingCanvas from './DrawingCanvas'
+import AnnotateToolbar from './AnnotateToolbar'
 import { executeWorkspaceCommand } from '../workspaceCommands'
 import './Canvas.css'
 
@@ -44,7 +46,9 @@ const Canvas: React.FC = () => {
     setViewport,
     movePanel,
     resizePanel,
-    deletePanel
+    deletePanel,
+    annotateMode,
+    annotateTool
   } = useWorkspaceStore()
 
   // Keep a mutable ref of the current viewport for IPC handler
@@ -127,6 +131,8 @@ const Canvas: React.FC = () => {
   }, [setViewport, zoomAtViewportPoint])
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    // Annotate mode: do not start panning or selection — drawing canvas handles it.
+    if (useWorkspaceStore.getState().annotateMode) return
     // Middle-click panning works anywhere (even over panels).
     if (e.button === 1) {
       e.preventDefault()
@@ -135,6 +141,9 @@ const Canvas: React.FC = () => {
       return
     }
     if (e.target === containerRef.current || e.target === contentRef.current || (e.target as HTMLElement).closest('.canvas-content') === contentRef.current) {
+      // Don't pan when clicking on annotation elements — they handle their own drag.
+      if ((e.target as HTMLElement).closest('.anno-image, .anno-sticky, .anno-label')) return
+      useWorkspaceStore.getState().clearAnnotationSelection()
       if (e.shiftKey) {
         const rect = containerRef.current?.getBoundingClientRect()
         if (!rect) return
@@ -144,6 +153,7 @@ const Canvas: React.FC = () => {
         return
       }
       if (e.ctrlKey || e.metaKey) return
+      useWorkspaceStore.getState().clearAnnotationSelection()
       setIsPanning(true)
       setPanStart({ x: e.clientX - viewport.x, y: e.clientY - viewport.y })
       clearSelection()
@@ -193,6 +203,26 @@ const Canvas: React.FC = () => {
         })
         .map(panel => panel.id)
       selectMultiple(selectedIds)
+
+      const state = useWorkspaceStore.getState()
+      const tab = state.tabs.find(t => t.id === state.activeTabId)
+      if (tab?.annotations) {
+        const annotationIds = tab.annotations
+          .filter(a => {
+            if (a.type === 'freehand' || a.type === 'arrow' || a.type === 'rectangle' || a.type === 'highlight' || a.type === 'relationship') return false
+            const aLeft = a.x * viewport.zoom + viewport.x
+            const aTop = a.y * viewport.zoom + viewport.y
+            const aRight = aLeft + (a.width || 40) * viewport.zoom
+            const aBottom = aTop + (a.height || 18) * viewport.zoom
+            return aRight >= selectionBox.x &&
+              aLeft <= selectionBox.x + selectionBox.width &&
+              aBottom >= selectionBox.y &&
+              aTop <= selectionBox.y + selectionBox.height
+          })
+          .map(a => a.id)
+        state.selectMultipleAnnotations(annotationIds)
+      }
+
       setSelectionBox(null)
     }
     setIsPanning(false)
@@ -288,14 +318,96 @@ const Canvas: React.FC = () => {
       if (isTextInput || isInsidePanelBody) return
 
       if (e.key === 'Escape') {
+        const s2 = useWorkspaceStore.getState()
+        if (s2.selectedAnnotationIds.length > 0) {
+          s2.clearAnnotationSelection()
+          return
+        }
         clearSelection()
         return
       }
 
+      // F key — focus selected annotation (fly viewport to it).
+      if (!isTextInput && (e.key === 'f' || e.key === 'F') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        const s = useWorkspaceStore.getState()
+        if (s.selectedAnnotationIds.length > 0) {
+          e.preventDefault()
+          const tab = s.tabs.find(t => t.id === s.activeTabId)
+          const a = tab?.annotations?.find(aa => aa.id === s.selectedAnnotationIds[0])
+          if (a) {
+            const ax = a.x + (a.width || 100) / 2
+            const ay = a.y + (a.height || 24) / 2
+            window.dispatchEvent(new CustomEvent('wts-smooth-viewport'))
+            s.setViewport({
+              zoom: 1,
+              x: window.innerWidth / 2 - ax,
+              y: window.innerHeight / 2 - ay
+            })
+          }
+          return
+        }
+      }
+
       if (!isTextInput && (e.key === 'Delete' || e.key === 'Backspace')) {
         e.preventDefault()
+        const s = useWorkspaceStore.getState()
+        if (s.selectedAnnotationIds.length > 0) {
+          s.selectedAnnotationIds.forEach(id => s.deleteAnnotation(id))
+          s.clearAnnotationSelection()
+          return
+        }
         deleteSelectedPanelsWithConfirmation()
         return
+      }
+
+      // Ctrl+Arrow → move selected annotation(s).
+      if (!isTextInput && (e.ctrlKey || e.metaKey) && !e.altKey &&
+          (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+        const s = useWorkspaceStore.getState()
+        if (s.selectedAnnotationIds.length > 0) {
+          e.preventDefault()
+          const step = e.shiftKey ? 80 : 20
+          const tab = s.tabs.find(t => t.id === s.activeTabId)
+          if (!tab?.annotations) return
+          s.selectedAnnotationIds.forEach(id => {
+            const a = tab.annotations!.find(aa => aa.id === id)
+            if (!a) return
+            let dx = 0, dy = 0
+            if (e.key === 'ArrowRight') dx = step
+            else if (e.key === 'ArrowLeft') dx = -step
+            else if (e.key === 'ArrowDown') dy = step
+            else if (e.key === 'ArrowUp') dy = -step
+            s.updateAnnotation(id, { x: a.x + dx, y: a.y + dy })
+          })
+          return
+        }
+        // Fall through to panel move handler below.
+      }
+
+      // Alt+Arrow → resize selected annotation(s).
+      if (!isTextInput && e.altKey && !e.ctrlKey && !e.metaKey &&
+          (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+        const s = useWorkspaceStore.getState()
+        if (s.selectedAnnotationIds.length > 0) {
+          e.preventDefault()
+          const step = 20
+          const sign = e.shiftKey ? -1 : 1
+          const tab = s.tabs.find(t => t.id === s.activeTabId)
+          if (!tab?.annotations) return
+          s.selectedAnnotationIds.forEach(id => {
+            const a = tab.annotations!.find(aa => aa.id === id)
+            if (!a) return
+            let { x, y, width, height } = a
+            const w = Math.max(20, width || 0)
+            const h = Math.max(20, height || 0)
+            if (e.key === 'ArrowRight') width = w + step * sign
+            else if (e.key === 'ArrowLeft') { width = w + step * sign; x -= step * sign }
+            else if (e.key === 'ArrowDown') height = h + step * sign
+            else if (e.key === 'ArrowUp') { height = h + step * sign; y -= step * sign }
+            s.updateAnnotation(id, { x, y, width: Math.max(20, width), height: Math.max(20, height) })
+          })
+          return
+        }
       }
 
       if (!(e.ctrlKey || e.metaKey) || e.altKey) {
@@ -431,6 +543,140 @@ const handleGestureChange = (e: any) => {
     ;(window as any).electronAPI?.onTouchpadPinch?.(handler)
   }, [zoomAtViewportPoint])
 
+  // Paste onto canvas — image or text, at cursor position.
+  useEffect(() => {
+    const handlePaste = async (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items
+      if (!items || items.length === 0) return
+
+      // Compute world coordinates from last known mouse position.
+      const last = lastMouseRef.current
+      const rect = containerRef.current?.getBoundingClientRect()
+      let worldX = 100, worldY = 100
+      if (rect && last) {
+        const v = useWorkspaceStore.getState().viewport
+        worldX = (last.x - v.x) / v.zoom
+        worldY = (last.y - v.y) / v.zoom
+      }
+
+      // Check for text first — simpler, synchronous, avoids multiple labels.
+      const textData = e.clipboardData?.getData?.('text/plain')
+      if (textData?.trim()) {
+        e.preventDefault()
+        const txt = textData.trim()
+        const lines = txt.split('\n').length
+        const estimatedW = Math.min(600, Math.max(300, Math.max(...txt.split('\n').map(l => l.length)) * 8))
+        const id = `anno-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+        useWorkspaceStore.getState().addAnnotation({
+          id, type: 'label',
+          x: worldX, y: worldY,
+          width: estimatedW, height: lines > 1 ? lines * 20 : 0,
+          text: txt, color: '',
+          title: txt.slice(0, 40).replace(/\n/g, ' ')
+        })
+        return
+      }
+
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i]
+        if (item.type.startsWith('image/')) {
+          e.preventDefault()
+          const blob = item.getAsFile()
+          if (!blob) continue
+          const reader = new FileReader()
+          reader.onload = async () => {
+            const dataUrl = reader.result as string
+            const base64 = dataUrl.split(',')[1]
+            // Get actual image dimensions.
+            const dims = await new Promise<{ w: number; h: number }>(resolve => {
+              const img = new Image()
+              img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight })
+              img.onerror = () => resolve({ w: 400, h: 300 })
+              img.src = dataUrl
+            })
+            const maxDim = 600
+            const scale = Math.min(1, maxDim / Math.max(dims.w, dims.h, 1))
+            const iw = Math.round(dims.w * scale)
+            const ih = Math.round(dims.h * scale)
+            const id = `anno-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+            const assetApi = (window as any).electronAPI?.fs // eslint-disable-line @typescript-eslint/no-explicit-any
+            if (!assetApi?.writeAsset) {
+              useWorkspaceStore.getState().addAnnotation({
+                id, type: 'image',
+                x: worldX - iw / 2, y: worldY - ih / 2,
+                width: iw, height: ih,
+                text: '', color: '', filename: dataUrl,
+                title: 'Image ' + id.slice(-6)
+              })
+              return
+            }
+            const res = await assetApi.writeAsset(base64, blob.name || 'paste.png')
+            if (res?.ok) {
+              useWorkspaceStore.getState().addAnnotation({
+                id, type: 'image',
+                x: worldX - iw / 2, y: worldY - ih / 2,
+                width: iw, height: ih,
+                text: '', color: '', filename: res.filename,
+                title: 'Image ' + id.slice(-6)
+              })
+            }
+          }
+          reader.readAsDataURL(blob)
+        }
+      }
+    }
+    document.addEventListener('paste', handlePaste)
+    return () => document.removeEventListener('paste', handlePaste)
+  }, [])
+
+  // Drag & drop image files onto canvas.
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    if (e.dataTransfer?.types?.includes('Files')) {
+      e.preventDefault()
+      e.dataTransfer.dropEffect = 'copy'
+    }
+  }, [])
+
+  const handleDrop = useCallback(async (e: React.DragEvent) => {
+    const files = e.dataTransfer?.files
+    if (!files) return
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i]
+      if (!file.type.startsWith('image/')) continue
+      e.preventDefault()
+      const reader = new FileReader()
+      reader.onload = async () => {
+        const dataUrl = reader.result as string
+        const base64 = dataUrl.split(',')[1]
+        const rect = containerRef.current?.getBoundingClientRect()
+        const dropX = rect ? (e.clientX - rect.left - viewport.x) / viewport.zoom : 100
+        const dropY = rect ? (e.clientY - rect.top - viewport.y) / viewport.zoom : 100
+        const assetApi = (window as any).electronAPI?.fs // eslint-disable-line @typescript-eslint/no-explicit-any
+        if (!assetApi?.writeAsset) {
+          const id = `anno-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+          useWorkspaceStore.getState().addAnnotation({
+            id, type: 'image',
+            x: dropX, y: dropY, width: 300, height: 200,
+            text: '', color: '', filename: dataUrl,
+            title: 'Image ' + id.slice(-6)
+          })
+          return
+        }
+        const res = await assetApi.writeAsset(base64, file.name)
+        if (res?.ok) {
+          const id = `anno-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+          useWorkspaceStore.getState().addAnnotation({
+            id, type: 'image',
+            x: dropX, y: dropY, width: 300, height: 200,
+            text: '', color: '', filename: res.filename,
+            title: 'Image ' + id.slice(-6)
+          })
+        }
+      }
+      reader.readAsDataURL(file)
+    }
+  }, [viewport.x, viewport.y, viewport.zoom])
+
   // Sort panels so regions render behind other panels. We still render detached
   // panels (they get visibility:hidden via the .detached class) so their state
   // — especially terminal xterm + pty stream — stays alive while popped out.
@@ -466,7 +712,7 @@ const handleGestureChange = (e: any) => {
   return (
     <div
       ref={containerRef}
-      className={`canvas-container ${isPanning ? 'grabbing' : ''}`}
+      className={`canvas-container ${isPanning ? 'grabbing' : ''} ${annotateMode ? `annotating annotate-${annotateTool}` : ''}`}
       onWheel={handleWheel}
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
@@ -475,6 +721,8 @@ const handleGestureChange = (e: any) => {
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
       onContextMenu={(e) => {
         const target = e.target as HTMLElement
         // Only show canvas context menu when right-clicking empty canvas, not a panel.
@@ -500,11 +748,13 @@ const handleGestureChange = (e: any) => {
             panel={panel}
             isSelected={selectedPanelIds.includes(panel.id)}
             offscreen={offscreenIds.has(panel.id)}
+            annotateMode={annotateMode}
             onSelect={handlePanelSelect}
             onMove={handlePanelMove}
             onResize={handlePanelResize}
           />
         ))}
+        <DrawingCanvas />
         <AnnotationLayer />
         {dragGuides.map((g, i) => (
           <div
@@ -518,6 +768,7 @@ const handleGestureChange = (e: any) => {
         ))}
       </div>
       {minimapVisible && <Minimap />}
+      <AnnotateToolbar />
       {canvasCtxMenu && (
         <CanvasContextMenu
           x={canvasCtxMenu.x}
