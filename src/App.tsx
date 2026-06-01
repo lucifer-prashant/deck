@@ -7,6 +7,7 @@ import WorkspaceChrome from './components/WorkspaceChrome'
 import Sidebar from './components/Sidebar'
 import StatusBar from './components/StatusBar'
 import HelpOverlay from './components/HelpOverlay'
+import EmptyState from './components/EmptyState'
 import JumpOverlay from './components/JumpOverlay'
 import PopoutWindow from './components/PopoutWindow'
 import { useWorkspaceStore } from './store/workspaceStore'
@@ -35,6 +36,9 @@ function MainAppShell() {
     undo,
     redo,
     theme,
+    panels,
+    tabs,
+    activeTabId,
     toggleMinimap,
     setJumpMode,
     selectPanel,
@@ -617,6 +621,9 @@ function MainAppShell() {
     return () => { offD?.(); offR?.() }
   }, [])
 
+  const tab = tabs.find(t => t.id === activeTabId)
+  const isEmpty = Object.keys(panels).length === 0 && (!tab?.annotations || tab.annotations.length === 0)
+
   return (
     <div className="app">
       {chromeVisible && <WorkspaceChrome />}
@@ -631,6 +638,7 @@ function MainAppShell() {
 
       <Sidebar />
       <AppCanvas />
+      {isEmpty && <EmptyState />}
       <StatusBar />
       {commandPaletteOpen && <CommandPalette />}
       <PanelFinder />
