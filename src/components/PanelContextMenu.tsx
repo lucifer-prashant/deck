@@ -23,7 +23,7 @@ const COLORS = [
   { name: 'Violet', value: '#7c3aed' }
 ]
 
-type Submenu = 'arrange' | 'layout' | 'browser' | null
+type Submenu = 'arrange' | null
 
 const PanelContextMenu: React.FC<Props> = ({ panel, x, y, onClose, onRename }) => {
   const menuRef = useRef<HTMLDivElement>(null)
@@ -33,7 +33,6 @@ const PanelContextMenu: React.FC<Props> = ({ panel, x, y, onClose, onRename }) =
     (panel.id.startsWith('preset-life-') || panel.id.startsWith('preset-no-life-')) &&
     panel.type === 'browser'
   const isAsleep = panel.type === 'browser' && !!(panel.settings as { lazyLoad?: boolean } | undefined)?.lazyLoad
-  const isStacked = !!(panel.stackParentId || (panel.stackChildren && panel.stackChildren.length > 0))
 
   const isAtFront = useMemo(() => {
     const maxZ = Math.max(1, ...Object.values(panels).map(p => p.zIndex || 1))
@@ -152,81 +151,34 @@ const PanelContextMenu: React.FC<Props> = ({ panel, x, y, onClose, onRename }) =
         )}
       </div>
 
-      {/* ── Layout submenu ── */}
-      <div
-        className={`ctx-item ctx-submenu-trigger ${submenu === 'layout' ? 'sub-open' : ''}`}
-        onMouseEnter={() => setSubmenu('layout')}
-        onMouseLeave={() => setSubmenu(null)}
-      >
-        <span>Layout</span><span className="ctx-sub-arrow">▸</span>
-        {submenu === 'layout' && (
-          <div className="ctx-submenu" onMouseEnter={() => setSubmenu('layout')} onMouseLeave={() => setSubmenu(null)}>
-            {isStacked && (
-              <button className="ctx-item" onClick={run(() => useWorkspaceStore.getState().unstackPanel(panel.id))}>
-                <span>Unstack panel</span>
-              </button>
-            )}
-            {selectedPanelIds.length > 1 && (
-              <button className="ctx-item" onClick={cmd('group-region')}>
-                <span>Group into region</span><span className="ctx-kbd">Ctrl+G</span>
-              </button>
-            )}
-            {panel.type === 'region' && (
-              <button className="ctx-item" onClick={cmd('ungroup-region')}>
-                <span>Ungroup region</span>
-              </button>
-            )}
-            {(isStacked || selectedPanelIds.length > 1 || panel.type === 'region') && selectedPanelIds.length > 1 && (
-              <div className="ctx-sep" />
-            )}
-            {selectedPanelIds.length > 1 && (
-              <>
-                <button className="ctx-item" onClick={cmd('align-left')}><span>Align left</span></button>
-                <button className="ctx-item" onClick={cmd('align-top')}><span>Align top</span></button>
-                <button className="ctx-item" onClick={cmd('distribute-horizontal')}><span>Distribute horiz.</span></button>
-              </>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* ── Browser submenu ── */}
+      {/* ── Browser actions ── */}
       {panel.type === 'browser' && (
-        <div
-          className={`ctx-item ctx-submenu-trigger ${submenu === 'browser' ? 'sub-open' : ''}`}
-          onMouseEnter={() => setSubmenu('browser')}
-          onMouseLeave={() => setSubmenu(null)}
-        >
-          <span>Browser</span><span className="ctx-sub-arrow">▸</span>
-          {submenu === 'browser' && (
-            <div className="ctx-submenu" onMouseEnter={() => setSubmenu('browser')} onMouseLeave={() => setSubmenu(null)}>
+        <>
+          <button className="ctx-item" onClick={run(() => updatePanel(panel.id, {
+            settings: { ...(panel.settings || {}), lazyLoad: !isAsleep }
+          }, { skipHistory: true }))}>
+            <span>{isAsleep ? 'Wake panel' : 'Put to sleep'}</span>
+          </button>
+          {isPresetBrowser && !isAsleep && (
+            <>
               <button className="ctx-item" onClick={run(() => updatePanel(panel.id, {
-                settings: { ...(panel.settings || {}), lazyLoad: !isAsleep }
+                settings: { ...(panel.settings || {}), browserCommand: { name: 'reload', nonce: Date.now() } }
               }, { skipHistory: true }))}>
-                <span>{isAsleep ? 'Wake panel' : 'Put to sleep'}</span>
+                <span>Reload view</span>
               </button>
-              {isPresetBrowser && !isAsleep && (
-                <>
-                  <button className="ctx-item" onClick={run(() => updatePanel(panel.id, {
-                    settings: { ...(panel.settings || {}), browserCommand: { name: 'reload', nonce: Date.now() } }
-                  }, { skipHistory: true }))}>
-                    <span>Reload view</span>
-                  </button>
-                  <button className="ctx-item" onClick={run(() => updatePanel(panel.id, {
-                    settings: { ...(panel.settings || {}), browserCommand: { name: 'back', nonce: Date.now() } }
-                  }, { skipHistory: true }))}>
-                    <span>Go back</span>
-                  </button>
-                  <button className="ctx-item" onClick={run(() => updatePanel(panel.id, {
-                    settings: { ...(panel.settings || {}), browserCommand: { name: 'forward', nonce: Date.now() } }
-                  }, { skipHistory: true }))}>
-                    <span>Go forward</span>
-                  </button>
-                </>
-              )}
-            </div>
+              <button className="ctx-item" onClick={run(() => updatePanel(panel.id, {
+                settings: { ...(panel.settings || {}), browserCommand: { name: 'back', nonce: Date.now() } }
+              }, { skipHistory: true }))}>
+                <span>Go back</span>
+              </button>
+              <button className="ctx-item" onClick={run(() => updatePanel(panel.id, {
+                settings: { ...(panel.settings || {}), browserCommand: { name: 'forward', nonce: Date.now() } }
+              }, { skipHistory: true }))}>
+                <span>Go forward</span>
+              </button>
+            </>
           )}
-        </div>
+        </>
       )}
 
       <div className="ctx-sep" />
