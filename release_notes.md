@@ -1,19 +1,16 @@
-# Release Notes - v0.5.0
+# Release Notes - v0.5.1
 
-## What's New in v0.5.0
+This patch release polishes the codebase by stripping retired features, resolving styling selectors, and correcting documentation and keyboard shortcuts.
 
-### Key Features
-* **Panel Switcher (Ctrl+Tab MRU):** A clean centered modal overlay tracking recently used (MRU) panels. Move with arrow keys or jump directly using keys `1-8`.
-* **Auto Layout Engine:** Effortlessly arrange canvas panels on demand. Select multiple panels and arrange them using **Grid**, **Masonry**, **Golden Ratio**, or **Cluster by Type** layouts (cycle strategies via `Ctrl+Shift+A` or the canvas context menu).
-* **Outline Sidebar Improvements:** Dedicated sidebar tab mapping all active tabs, panels, and starred items. Features multi-type filters (TERM/EDIT/WEB), status health dots, and keyboard-driven selection focus.
-* **Ambient Health Indicators:** Status dots on panel headers tracking runtime health (alive, loading, sleeping, crashed) with one-click reload/restart capabilities.
-* **Canvas Cursor Spawning:** Spawning panels via shortcuts (`Ctrl+B`, `Ctrl+E`, `Ctrl+T`) now automatically targets the world cursor coordinates.
-* **Focus Mode Enhancements:** Focus selected (`F` key) now centers panels dynamically, taking open sidebars and chrome/status bar visibility into account.
-* **Browser & Editor Lazy Loading:** Explicitly suspend and sleep background browsers and code-server editors to reclaim memory and CPU usage.
-* **Browser Kiosk (App) Mode:** Right-click browser panels to run them distraction-free without tabs or URL bars, utilizing compact navigation buttons (`‹ ↻ ›`).
+## What's Changed in v0.5.1
 
-### Work in Progress / Known Limitations
-* **Win+Tab Switcher (Under Progress):** The Win+Tab (Alt+Tab-style) switcher card overlay is currently under progress and does not work as intended yet. 
+### 🧹 Codebase Refactoring & Cleanup
+* **Retired Tokens Feature Removal:** Removed the orphaned `TokensSection.tsx` component, clean-up of `tokens:scan` backend handlers, sqlite3 log scanners, and pricing helper functions in `electron/main.ts` and `preload.ts`.
+* **Obsolete Style Selectors Stripped:** Cleaned up unused style rules matching `.tokens-...`, `.panel-type-note`, and `.note-content` selectors from `Sidebar.css` and `Panel.css`.
+* **Shortcuts & Settings Polishes:** 
+  * Updated keybind reference guides in `HelpOverlay.tsx` to list `Sidebar (Explorer/Git/Outline)`.
+  * Corrected keybind rows in `SettingsPane.tsx` to list `Ctrl+B` as `New Browser panel` matching its actual implementation.
+* **Metadata Type Safety fallback:** Added a safe metadata fallback to `TYPE_META.editor` inside the `WinTabSwitcher` to prevent potential crashes on unknown panel types.
 
 ---
 *Packaged and released by lucifer-prashant*
