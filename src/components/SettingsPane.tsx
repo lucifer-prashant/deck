@@ -207,7 +207,7 @@ const SettingsPane: React.FC = () => {
 								</p>
 								<ShortcutRow keys="Ctrl+P" label="Command palette" />
 								<ShortcutRow keys="Ctrl+F" label="Find panel" />
-								<ShortcutRow keys="Ctrl+B" label="Outliner" />
+								<ShortcutRow keys="Ctrl+B" label="New Browser panel" />
 								<ShortcutRow
 									keys="Ctrl+Shift+B"
 									label="Sidebar (explorer/git/outline)"

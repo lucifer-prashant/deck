@@ -61,7 +61,7 @@ const SHORTCUTS: Array<{ section: string; items: Array<[string, string]> }> = [
     section: 'Workspace',
     items: [
       ['Command palette', 'Ctrl+P'],
-      ['Sidebar (Explorer/Git/Tokens)', 'Ctrl+Shift+B'],
+      ['Sidebar (Explorer/Git/Outline)', 'Ctrl+Shift+B'],
       ['New Browser panel', 'Ctrl+B'],
       ['Help (this)', '?  /  F1'],
       ['Undo / Redo', 'Ctrl+Z / Ctrl+Shift+Z'],

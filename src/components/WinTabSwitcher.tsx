@@ -46,7 +46,7 @@ const WinTabSwitcher: React.FC = () => {
       .filter(Boolean)
       .map((p: Panel) => ({
         panel: p,
-        meta: TYPE_META[p.type] || TYPE_META.note,
+        meta: TYPE_META[p.type] || TYPE_META.editor,
         context: getContext(p),
         healthState: (() => {
           const ll = (p.settings as { lazyLoad?: boolean } | undefined)?.lazyLoad

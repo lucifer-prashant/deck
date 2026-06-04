@@ -59,9 +59,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     writeAsset: (data: string, filename?: string) => ipcRenderer.invoke('fs:write-asset', { data, filename }),
     assetDir: () => ipcRenderer.invoke('fs:asset-dir')
   },
-  tokens: {
-    scan: () => ipcRenderer.invoke('tokens:scan')
-  },
   search: {
     files: (root: string, query: string, maxResults?: number) => ipcRenderer.invoke('search:files', { root, query, maxResults })
   },
@@ -163,9 +160,6 @@ declare global {
         touch: (path: string) => Promise<{ ok: boolean; error?: string }>
         reveal: (path: string) => Promise<{ ok: boolean; error?: string }>
         trash: (path: string) => Promise<{ ok: boolean; error?: string }>
-      }
-      tokens: {
-        scan: () => Promise<{ ok: boolean; rows?: Array<{ tool: string; project: string; model: string; day: string; input: number; output: number; cacheCreate: number; cacheRead: number; messages: number; costUsd: number }>; scannedAt?: number; error?: string }>
       }
       search: {
         files: (root: string, query: string, maxResults?: number) => Promise<{ ok: boolean; results: Array<{ file: string; line: number; text: string }>; tool: string }>
