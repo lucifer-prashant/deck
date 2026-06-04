@@ -36,12 +36,11 @@ coverage
 .cache/
 .turbo/
 
-# claude / agent working files (never tracked)
 .claude/
 .opencode/
 CLAUDE.md
 
-# local working notes (kept out of repo)
+
 TODO_FINAL_BOSS.txt
 FEATURES.txt
 token-usage-sidebar-feature-notes.txt
