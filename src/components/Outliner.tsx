@@ -1,5 +1,6 @@
-import React, { useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useWorkspaceStore, type Panel } from '../store/workspaceStore'
+import { executeWorkspaceCommand } from '../workspaceCommands'
 import PanelContextMenu from './PanelContextMenu'
 import './Outliner.css'
 
@@ -11,6 +12,15 @@ const TYPE_LABEL: Record<string, string> = {
   region: 'REGION'
 }
 
+const PANEL_TYPES: Panel['type'][] = ['terminal', 'editor', 'browser']
+
+const HEALTH_COLOR: Record<string, string> = {
+  alive: '#22c55e',
+  loading: '#f59e0b',
+  sleeping: '#6b7280',
+  crashed: '#ef4444',
+}
+
 const Outliner: React.FC = () => {
   const {
     tabs,
@@ -18,7 +28,6 @@ const Outliner: React.FC = () => {
     outlinerOpen,
     selectedPanelIds,
     selectPanel,
-    setViewport,
     switchTab,
     toggleOutliner,
     updatePanel,
@@ -29,12 +38,22 @@ const Outliner: React.FC = () => {
   const [draft, setDraft] = useState('')
   const [collapsedTabs, setCollapsedTabs] = useState<Record<string, boolean>>({})
   const [ctxMenu, setCtxMenu] = useState<{ panel: Panel; x: number; y: number } | null>(null)
+  // Type filter pills (multi-select).
+  const [activeTypes, setActiveTypes] = useState<Set<Panel['type']>>(new Set())
+  // Keyboard navigation focus.
+  const [focusedIdx, setFocusedIdx] = useState(-1)
+  const bodyRef = useRef<HTMLDivElement>(null)
 
   const filteredByTab = useMemo(() => {
     const q = query.trim().toLowerCase()
+    const hasFilter = activeTypes.size > 0
     return tabs.map(tab => {
       const all = Object.values(tab.panels)
-        .filter(p => !q || p.title.toLowerCase().includes(q) || p.type.includes(q))
+        .filter(p => {
+          if (hasFilter && p.type !== 'region' && !activeTypes.has(p.type)) return false
+          if (q && !p.title.toLowerCase().includes(q) && !p.type.includes(q)) return false
+          return true
+        })
       const regions = all.filter(p => p.type === 'region')
       const orphans = all.filter(p => p.type !== 'region' && !p.regionId)
       const byRegion: Record<string, Panel[]> = {}
@@ -46,7 +65,7 @@ const Outliner: React.FC = () => {
       })
       return { tab, regions, orphans, byRegion, total: all.length }
     })
-  }, [tabs, query])
+  }, [tabs, query, activeTypes])
 
   // Cross-tab starred panels
   const starred = useMemo(() => {
@@ -59,17 +78,31 @@ const Outliner: React.FC = () => {
     return out
   }, [tabs])
 
-  const jumpTo = (tabId: string, panel: Panel) => {
-    if (tabId !== activeTabId) switchTab(tabId)
-    requestAnimationFrame(() => {
-      selectPanel(panel.id)
-      window.dispatchEvent(new CustomEvent('wts-smooth-viewport'))
-      setViewport({
-        zoom: 1,
-        x: window.innerWidth / 2 - (panel.x + panel.width / 2),
-        y: window.innerHeight / 2 - (panel.y + panel.height / 2)
+  // Build flat list of focusable rows for keyboard nav.
+  const focusableRows = useMemo(() => {
+    const rows: Array<{ tabId: string; panel: Panel }> = []
+    // Starred rows first.
+    starred.forEach(({ tabId, panel: p }) => rows.push({ tabId, panel: p }))
+    // Then tab body rows.
+    filteredByTab.forEach(({ tab, regions, orphans, byRegion }) => {
+      const collapsed = collapsedTabs[tab.id] ?? (tab.id !== activeTabId)
+      if (collapsed) return
+      regions.forEach(r => {
+        rows.push({ tabId: tab.id, panel: r })
+        ;(byRegion[r.id] || []).forEach(c => rows.push({ tabId: tab.id, panel: c }))
       })
+      orphans.forEach(p => rows.push({ tabId: tab.id, panel: p }))
     })
+    return rows
+  }, [starred, filteredByTab, collapsedTabs, activeTabId])
+
+  const toggleType = (t: Panel['type']) => {
+    setActiveTypes(prev => {
+      const next = new Set(prev)
+      if (next.has(t)) next.delete(t); else next.add(t)
+      return next
+    })
+    setFocusedIdx(-1)
   }
 
   const commitRename = (id: string) => {
@@ -78,15 +111,68 @@ const Outliner: React.FC = () => {
     setRenamingId(null)
   }
 
+  const jumpTo = useCallback((tabId: string, panel: Panel) => {
+    if (tabId !== activeTabId) switchTab(tabId)
+    requestAnimationFrame(() => {
+      selectPanel(panel.id)
+      // Use the same focus behavior as pressing F — proper zoom, padding, sidebar awareness.
+      useWorkspaceStore.getState().enterFocusMode()
+      executeWorkspaceCommand('focus-selected')
+    })
+  }, [activeTabId, switchTab, selectPanel])
+
+  // Keyboard navigation.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (!outlinerOpen || renamingId) return
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setFocusedIdx(i => Math.min(i + 1, focusableRows.length - 1))
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setFocusedIdx(i => Math.max(i - 1, 0))
+      } else if (e.key === 'Enter' && focusedIdx >= 0) {
+        e.preventDefault()
+        const row = focusableRows[focusedIdx]
+        if (row) jumpTo(row.tabId, row.panel)
+      } else if (e.key === 'Escape') {
+        setFocusedIdx(-1)
+        setCtxMenu(null)
+      }
+    }
+    // Capture phase so we get the event before the sidebar/canvas can consume it.
+    window.addEventListener('keydown', handler, true)
+    return () => window.removeEventListener('keydown', handler, true)
+  }, [outlinerOpen, renamingId, focusedIdx, focusableRows, jumpTo])
+
+  // Scroll focused row into view.
+  useEffect(() => {
+    if (focusedIdx < 0 || !bodyRef.current) return
+    const row = bodyRef.current.querySelectorAll('.outliner-row')[focusedIdx] as HTMLElement | null
+    row?.scrollIntoView({ block: 'nearest' })
+  }, [focusedIdx])
+
+  // Pre-compute focus index for each panel.
+  const focusIndexMap = useMemo(() => {
+    const map = new Map<string, number>()
+    focusableRows.forEach((r, i) => map.set(r.panel.id, i))
+    return map
+  }, [focusableRows])
+
   if (!outlinerOpen) return null
 
-  const renderRow = (tabId: string, p: Panel, indent = 0) => {
+  const renderRow = (tabId: string, p: Panel, idx: number, indent = 0) => {
     const isActiveTab = tabId === activeTabId
     const isSel = isActiveTab && selectedPanelIds.includes(p.id)
+    const isFocused = idx === focusedIdx
+    const lazyLoad = (p.settings as { lazyLoad?: boolean } | undefined)?.lazyLoad
+    const healthState = p.healthState || (lazyLoad ? 'sleeping' : 'alive')
+    const healthColor = HEALTH_COLOR[healthState]
     return (
       <div
         key={`${tabId}:${p.id}`}
-        className={`outliner-row ${isSel ? 'selected' : ''} ${!isActiveTab ? 'foreign' : ''}`}
+        ref={isFocused ? (el) => el?.scrollIntoView({ block: 'nearest' }) : undefined}
+        className={`outliner-row ${isSel ? 'selected' : ''} ${!isActiveTab ? 'foreign' : ''} ${isFocused ? 'focused' : ''}`}
         style={{ paddingLeft: 10 + indent * 14 }}
         draggable={isActiveTab}
         onDragStart={(e) => {
@@ -110,6 +196,11 @@ const Outliner: React.FC = () => {
       >
         <span className={`outliner-type t-${p.type}`}>{TYPE_LABEL[p.type] || p.type}</span>
         {p.color && <span className="outliner-color" style={{ background: p.color }} />}
+        <span
+          className={`outliner-health ${healthState === 'loading' ? 'pulse' : ''}`}
+          style={{ background: healthColor }}
+          title={`Health: ${healthState}`}
+        />
         {renamingId === p.id ? (
           <input
             autoFocus
@@ -127,7 +218,13 @@ const Outliner: React.FC = () => {
         ) : (
           <span className="outliner-title">{p.title}</span>
         )}
-        {p.starred && <span className="outliner-flag" title="Starred">★</span>}
+        {/* Star toggle */}
+        <button
+          className={`outliner-star-btn ${p.starred ? 'active' : ''}`}
+          title={p.starred ? 'Unstar' : 'Star'}
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => { e.stopPropagation(); updatePanel(p.id, { starred: !p.starred }, { skipHistory: true }) }}
+        >{p.starred ? '★' : '☆'}</button>
         {p.locked && <span className="outliner-flag" title="Locked">🔒</span>}
         {p.minimized && <span className="outliner-flag" title="Minimized">▭</span>}
         {p.pinFront && <span className="outliner-flag" title="Pinned to front">📌</span>}
@@ -155,7 +252,20 @@ const Outliner: React.FC = () => {
         value={query}
         onChange={(e) => setQuery(e.target.value)}
       />
-      <div className="outliner-body">
+      <div className="outliner-filters">
+        {PANEL_TYPES.map(t => {
+          const active = activeTypes.has(t)
+          return (
+            <button
+              key={t}
+              className={`outliner-pill ${active ? 'active' : ''}`}
+              onClick={() => toggleType(t)}
+              title={active ? `Hide ${TYPE_LABEL[t]}` : `Show ${TYPE_LABEL[t]}`}
+            >{TYPE_LABEL[t]}</button>
+          )
+        })}
+      </div>
+      <div className="outliner-body" ref={bodyRef}>
         {starred.length > 0 && (
           <div className="outliner-tab-group starred">
             <div className="outliner-tab-header">
@@ -167,14 +277,33 @@ const Outliner: React.FC = () => {
               {starred.map(({ tabId, tabTitle, panel: p }) => (
                 <div
                   key={`star:${tabId}:${p.id}`}
-                  className={`outliner-row ${tabId !== activeTabId ? 'foreign' : ''}`}
+                  className={`outliner-row ${tabId !== activeTabId ? 'foreign' : ''} ${focusedIdx === (focusIndexMap.get(p.id) ?? -1) ? 'focused' : ''}`}
                   style={{ paddingLeft: 10 }}
                   onClick={() => jumpTo(tabId, p)}
                   title={`${p.title} — ${tabTitle}`}
                 >
                   <span className={`outliner-type t-${p.type}`}>{TYPE_LABEL[p.type] || p.type}</span>
+                  {p.color && <span className="outliner-color" style={{ background: p.color }} />}
+                  {(() => {
+                    const ll = (p.settings as { lazyLoad?: boolean } | undefined)?.lazyLoad
+                    const hs = p.healthState || (ll ? 'sleeping' : 'alive')
+                    const hc = HEALTH_COLOR[hs]
+                    return (
+                      <span
+                        className={`outliner-health ${hs === 'loading' ? 'pulse' : ''}`}
+                        style={{ background: hc }}
+                        title={`Health: ${hs}`}
+                      />
+                    )
+                  })()}
                   <span className="outliner-title">{p.title}</span>
                   <span className="outliner-foreign-tab">{tabTitle}</span>
+                  {/* Star toggle */}
+                  <button
+                    className="outliner-star-btn active"
+                    title="Unstar"
+                    onClick={(e) => { e.stopPropagation(); updatePanel(p.id, { starred: false }, { skipHistory: true }) }}
+                  >★</button>
                 </div>
               ))}
             </div>
@@ -208,12 +337,12 @@ const Outliner: React.FC = () => {
                 <div className="outliner-tab-body">
                   {regions.map(region => (
                     <div key={region.id} className="outliner-group">
-                      {renderRow(tab.id, region)}
-                      {(byRegion[region.id] || []).map(child => renderRow(tab.id, child, 1))}
+                      {renderRow(tab.id, region, focusIndexMap.get(region.id) ?? -1)}
+                      {(byRegion[region.id] || []).map(child => renderRow(tab.id, child, focusIndexMap.get(child.id) ?? -1, 1))}
                     </div>
                   ))}
                   {orphans.length > 0 && regions.length > 0 && <div className="outliner-divider" />}
-                  {orphans.map(p => renderRow(tab.id, p))}
+                  {orphans.map(p => renderRow(tab.id, p, focusIndexMap.get(p.id) ?? -1))}
                   {total === 0 && <div className="outliner-empty thin">(empty)</div>}
                 </div>
               )}

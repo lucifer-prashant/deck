@@ -122,7 +122,7 @@ export interface Panel {
   healthState?: 'alive' | 'loading' | 'sleeping' | 'loaded' | 'dead' | 'crashed'
 }
 
-export type SidebarSection = 'explorer' | 'git' | 'tokens' | 'notes' | 'outline'
+export type SidebarSection = 'explorer' | 'git' | 'outline'
 
 export interface Viewport {
   x: number
@@ -280,6 +280,19 @@ export interface WorkspaceState {
   drawStrokeWidth: number
   annotateSourcePanelId: string | null
   annotationsBehindPanels: boolean
+  // Annotation-only history (separate from panel undo/redo).
+  annotationPast: Annotation[][]
+  annotationFuture: Annotation[][]
+  // Panel MRU quick-switcher.
+  panelMruOrder: string[]       // panel IDs, most recent first (cap at 20)
+  panelSwitcherOpen: boolean
+  // Win+Tab Alt+Tab-style switcher.
+  winTabOpen: boolean
+  winTabCancelled: boolean
+  winTabSelectedPanelId: string | null
+  winTabSessionPanels: string[]  // MRU snapshot on open
+  // Cursor world position — updated by Canvas on mouse move, used for panel spawning.
+  cursorWorldPos: { x: number; y: number }
 
   setHeaderActivePanel: (id: string | null) => void
   setBodyActivePanel: (id: string | null) => void
@@ -342,6 +355,20 @@ export interface WorkspaceState {
   setDrawStrokeWidth: (width: number) => void
   setAnnotateSourcePanel: (id: string | null) => void
   toggleAnnotationsBehindPanels: () => void
+  // Annotation-only undo/redo (annotate mode).
+  pushAnnotationHistory: () => void
+  undoAnnotation: () => void
+  redoAnnotation: () => void
+  // Panel MRU switcher.
+  pushPanelMru: (id: string) => void
+  togglePanelSwitcher: () => void
+  setPanelSwitcherOpen: (open: boolean) => void
+  // Win+Tab switcher.
+  openWinTabSwitcher: () => void
+  closeWinTabSwitcher: (commit: boolean) => void
+  cycleWinTabSelection: (direction: 1 | -1) => void
+  selectWinTabPanel: (idx: number) => void
+  setCursorWorldPos: (x: number, y: number) => void
   groupIntoRegion: (panelIds: string[], regionName: string) => string
   ungroupRegion: (regionId: string) => void
   updateRegionMembership: (panelIds: string[]) => void
@@ -379,14 +406,34 @@ const createEmptyTab = (title = 'Canvas'): WorkspaceTab => ({
 
 const initialTab = createEmptyTab('Canvas 1')
 
-const syncActiveTab = (state: WorkspaceState, updates: Partial<Pick<WorkspaceTab, 'panels' | 'viewport' | 'selectedPanelIds'>>) => ({
+const syncActiveTab = (state: WorkspaceState, updates: Partial<Pick<WorkspaceTab, 'panels' | 'viewport' | 'selectedPanelIds'>>, opts?: { skipDirty?: boolean }) => ({
   tabs: state.tabs.map(tab => {
     if (tab.id !== state.activeTabId) return tab
     const next: WorkspaceTab = { ...tab, ...updates }
-    if ('panels' in updates) next.lastEditedAt = Date.now()
+    if ('panels' in updates && !opts?.skipDirty) next.lastEditedAt = Date.now()
     return next
   })
 })
+
+const fitViewportToPanels = (panels: Record<string, Panel>): Viewport => {
+  const items = Object.values(panels).filter(p => p.type !== 'region')
+  if (items.length === 0) return { x: 0, y: 0, zoom: 1 }
+  const minX = Math.min(...items.map(p => p.x))
+  const minY = Math.min(...items.map(p => p.y))
+  const maxX = Math.max(...items.map(p => p.x + p.width))
+  const maxY = Math.max(...items.map(p => p.y + p.height))
+  const bounds = { x: minX, y: minY, width: maxX - minX, height: maxY - minY }
+  const pad = 96
+  const zoom = Math.max(0.02, Math.min(2, Math.min(
+    (window.innerWidth - pad * 2) / Math.max(bounds.width, 1),
+    (window.innerHeight - pad * 2) / Math.max(bounds.height, 1)
+  )))
+  return {
+    zoom,
+    x: window.innerWidth / 2 - (bounds.x + bounds.width / 2) * zoom,
+    y: window.innerHeight / 2 - (bounds.y + bounds.height / 2) * zoom
+  }
+}
 
 const snapshot = (state: WorkspaceState): HistorySnapshot => ({
   panels: state.panels,
@@ -437,6 +484,15 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       drawStrokeWidth: 2,
       annotateSourcePanelId: null,
       annotationsBehindPanels: false,
+      annotationPast: [],
+      annotationFuture: [],
+      panelMruOrder: [],
+      panelSwitcherOpen: false,
+      winTabOpen: false,
+      winTabCancelled: false,
+      winTabSelectedPanelId: null,
+      winTabSessionPanels: [],
+      cursorWorldPos: { x: 100, y: 100 },
 
       setHeaderActivePanel: (id) => set({ headerActivePanelId: id }),
       setBodyActivePanel: (id) => set(state => {
@@ -454,7 +510,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         const hidden = state.hiddenSidebarSections.includes(s)
           ? state.hiddenSidebarSections.filter(x => x !== s)
           : [...state.hiddenSidebarSections, s]
-        const ALL: SidebarSection[] = ['explorer', 'git', 'tokens', 'notes', 'outline']
+        const ALL: SidebarSection[] = ['explorer', 'git', 'outline']
         const visible = ALL.filter(x => !hidden.includes(x))
         const nextSection = hidden.includes(state.sidebarSection)
           ? (visible[0] || state.sidebarSection)
@@ -519,7 +575,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             past: [...state.past.slice(-HISTORY_LIMIT + 1), snapshot(state)],
             future: []
           }
-          return { ...base, panels, ...syncActiveTab(state, { panels }) }
+          return { ...base, panels, ...syncActiveTab(state, { panels }, { skipDirty: opts?.skipHistory }) }
         }),
 
       deletePanel: (id) =>
@@ -600,7 +656,10 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           // should keep following the previously focused real panel.
           const target = state.panels[id]
           const nextLastFocused = target?.type === 'region' ? state.lastFocusedPanelId : id
-          return { selectedPanelIds, headerActivePanelId, bodyActivePanelId, lastFocusedPanelId: nextLastFocused, selectedAnnotationIds: additive ? state.selectedAnnotationIds : [], ...syncActiveTab(state, { selectedPanelIds }) }
+          // Push to MRU.
+          const curMru = state.panelMruOrder.filter(x => x !== id)
+          const panelMruOrder = [id, ...curMru].slice(0, 20)
+          return { selectedPanelIds, headerActivePanelId, bodyActivePanelId, lastFocusedPanelId: nextLastFocused, selectedAnnotationIds: additive ? state.selectedAnnotationIds : [], panelMruOrder, ...syncActiveTab(state, { selectedPanelIds }) }
         }),
 
       selectMultiple: (ids) => set((state) => ({ selectedPanelIds: ids, headerActivePanelId: null, bodyActivePanelId: null, ...syncActiveTab(state, { selectedPanelIds: ids }) })),
@@ -749,8 +808,9 @@ export const useWorkspaceStore = create<WorkspaceState>()(
               }
             })
 
+            const fitted = fitViewportToPanels(updatedPanels)
             const updatedTabs = cur.tabs.map(t =>
-              t.id === existing.id ? { ...t, panels: updatedPanels, kind, lastEditedAt: undefined } : t
+              t.id === existing.id ? { ...t, panels: updatedPanels, kind, lastEditedAt: 0, lastSavedAt: Date.now() } : t
             )
             const isActive = cur.activeTabId === existing.id
             set({
@@ -758,7 +818,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
               activeTabId: existing.id,
               panels: updatedPanels,
               selectedPanelIds: isActive ? cur.selectedPanelIds : [],
-              viewport: existing.viewport,
+              viewport: fitted,
               past: [],
               future: [],
               presetGraveyards: { ...cur.presetGraveyards, [name]: newGraveyard }
@@ -783,15 +843,18 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             }
           })
           void presetPanelId
+          const fitted = fitViewportToPanels(panelMap)
           const tab: WorkspaceTab = {
             id: `tab-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
             title: meta.title,
             color: meta.color,
             panels: panelMap,
-            viewport: { x: 0, y: 0, zoom: 1 },
+            viewport: fitted,
             selectedPanelIds: [],
             createdAt: Date.now(),
-            kind
+            kind,
+            lastSavedAt: Date.now(),
+            lastEditedAt: 0
           }
           set(state => ({
             tabs: [...state.tabs, tab],
@@ -978,43 +1041,160 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           return { panels, ...syncActiveTab(state, { panels }) }
         }),
 
-      addAnnotation: (a) => set((state) => ({
-        tabs: state.tabs.map(t =>
-          t.id === state.activeTabId
-            ? { ...t, annotations: [...(t.annotations || []), a], lastEditedAt: Date.now() }
-            : t
-        )
-      })),
-      updateAnnotation: (id, updates) => set((state) => ({
-        tabs: state.tabs.map(t =>
-          t.id === state.activeTabId
-            ? { ...t, annotations: (t.annotations || []).map(a => a.id === id ? { ...a, ...updates } : a), lastEditedAt: Date.now() }
-            : t
-        )
-      })),
-      deleteAnnotation: (id) => set((state) => ({
-        tabs: state.tabs.map(t =>
-          t.id === state.activeTabId
-            ? { ...t, annotations: (t.annotations || []).filter(a => a.id !== id), lastEditedAt: Date.now() }
-            : t
-        ),
-        selectedAnnotationIds: state.selectedAnnotationIds.filter(aid => aid !== id)
-      })),
+      addAnnotation: (a) => set((state) => {
+        const tab = state.tabs.find(t => t.id === state.activeTabId)
+        const base = state.annotateMode
+          ? { annotationPast: [...state.annotationPast.slice(-59), JSON.parse(JSON.stringify(tab?.annotations || []))], annotationFuture: [] as Annotation[][] }
+          : {}
+        return {
+          tabs: state.tabs.map(t =>
+            t.id === state.activeTabId
+              ? { ...t, annotations: [...(t.annotations || []), a], lastEditedAt: Date.now() }
+              : t
+          ),
+          ...base
+        }
+      }),
+      updateAnnotation: (id, updates) => set((state) => {
+        const tab = state.tabs.find(t => t.id === state.activeTabId)
+        const base = state.annotateMode
+          ? { annotationPast: [...state.annotationPast.slice(-59), JSON.parse(JSON.stringify(tab?.annotations || []))], annotationFuture: [] as Annotation[][] }
+          : {}
+        return {
+          tabs: state.tabs.map(t =>
+            t.id === state.activeTabId
+              ? { ...t, annotations: (t.annotations || []).map(a => a.id === id ? { ...a, ...updates } : a), lastEditedAt: Date.now() }
+              : t
+          ),
+          ...base
+        }
+      }),
+      deleteAnnotation: (id) => set((state) => {
+        const tab = state.tabs.find(t => t.id === state.activeTabId)
+        const base = state.annotateMode
+          ? { annotationPast: [...state.annotationPast.slice(-59), JSON.parse(JSON.stringify(tab?.annotations || []))], annotationFuture: [] as Annotation[][] }
+          : {}
+        return {
+          tabs: state.tabs.map(t =>
+            t.id === state.activeTabId
+              ? { ...t, annotations: (t.annotations || []).filter(a => a.id !== id), lastEditedAt: Date.now() }
+              : t
+          ),
+          selectedAnnotationIds: state.selectedAnnotationIds.filter(aid => aid !== id),
+          ...base
+        }
+      }),
 
       selectAnnotation: (id) => set({ selectedAnnotationIds: [id] }),
       selectMultipleAnnotations: (ids) => set({ selectedAnnotationIds: ids }),
       clearAnnotationSelection: () => set({ selectedAnnotationIds: [] }),
 
-      toggleAnnotateMode: () => set(state => ({
-        annotateMode: !state.annotateMode,
-        annotateTool: state.annotateMode ? state.annotateTool : 'select'
-      })),
+      toggleAnnotateMode: () => set(state => {
+        const entering = !state.annotateMode
+        const tab = state.tabs.find(t => t.id === state.activeTabId)
+        return {
+          annotateMode: entering,
+          annotateTool: entering ? 'select' : state.annotateTool,
+          // Capture baseline on enter, clear history on exit.
+          annotationPast: entering ? [JSON.parse(JSON.stringify(tab?.annotations || []))] : [],
+          annotationFuture: [],
+        }
+      }),
       setAnnotateTool: (tool) => set({ annotateTool: tool }),
       toggleAnnotationsVisible: () => set(state => ({ annotationsVisible: !state.annotationsVisible })),
       setDrawColor: (color) => set({ drawColor: color }),
       setDrawStrokeWidth: (width) => set({ drawStrokeWidth: width }),
       setAnnotateSourcePanel: (id) => set({ annotateSourcePanelId: id }),
       toggleAnnotationsBehindPanels: () => set(s => ({ annotationsBehindPanels: !s.annotationsBehindPanels })),
+
+      // Annotation-only undo/redo — snapshots the active tab's annotations array.
+      pushAnnotationHistory: () => set(state => {
+        const tab = state.tabs.find(t => t.id === state.activeTabId)
+        const annos = tab?.annotations ? JSON.parse(JSON.stringify(tab.annotations)) as Annotation[] : []
+        return {
+          annotationPast: [...state.annotationPast.slice(-59), annos],
+          annotationFuture: []
+        }
+      }),
+      undoAnnotation: () => set(state => {
+        if (state.annotationPast.length === 0) return state
+        const tab = state.tabs.find(t => t.id === state.activeTabId)
+        const current = tab?.annotations ? JSON.parse(JSON.stringify(tab.annotations)) as Annotation[] : []
+        const prev = state.annotationPast[state.annotationPast.length - 1]
+        return {
+          annotationPast: state.annotationPast.slice(0, -1),
+          annotationFuture: [current, ...state.annotationFuture].slice(0, 60),
+          tabs: state.tabs.map(t =>
+            t.id === state.activeTabId
+              ? { ...t, annotations: prev, lastEditedAt: Date.now() }
+              : t
+          )
+        }
+      }),
+      redoAnnotation: () => set(state => {
+        if (state.annotationFuture.length === 0) return state
+        const tab = state.tabs.find(t => t.id === state.activeTabId)
+        const current = tab?.annotations ? JSON.parse(JSON.stringify(tab.annotations)) as Annotation[] : []
+        const next = state.annotationFuture[0]
+        return {
+          annotationFuture: state.annotationFuture.slice(1),
+          annotationPast: [...state.annotationPast, current].slice(-60),
+          tabs: state.tabs.map(t =>
+            t.id === state.activeTabId
+              ? { ...t, annotations: next, lastEditedAt: Date.now() }
+              : t
+          )
+        }
+      }),
+
+      // Panel MRU tracking — push to front, dedup, cap at 20.
+      pushPanelMru: (id) => set(state => {
+        const cur = state.panelMruOrder.filter(x => x !== id)
+        return { panelMruOrder: [id, ...cur].slice(0, 20) }
+      }),
+      togglePanelSwitcher: () => set(state => {
+        // Populate MRU from current tab panels if empty.
+        if (state.panelMruOrder.length === 0) {
+          const ids = Object.values(state.panels).filter(p => p.type !== 'region').map(p => p.id)
+          return { panelSwitcherOpen: !state.panelSwitcherOpen, panelMruOrder: ids.slice(0, 20) }
+        }
+        return { panelSwitcherOpen: !state.panelSwitcherOpen }
+      }),
+      setPanelSwitcherOpen: (open) => set(state => {
+        if (open && state.panelMruOrder.length === 0) {
+          const ids = Object.values(state.panels).filter(p => p.type !== 'region').map(p => p.id)
+          return { panelSwitcherOpen: true, panelMruOrder: ids.slice(0, 20) }
+        }
+        return { panelSwitcherOpen: open }
+      }),
+      // Win+Tab switcher — snapshot MRU on open, pre-select next panel.
+      openWinTabSwitcher: () => set(state => {
+        const mru = state.panelMruOrder.filter(id => state.panels[id] && state.panels[id].type !== 'region').slice(0, 20)
+        // Pre-select the NEXT panel (MRU[1]), not current. Fallback to MRU[0] if only 1.
+        const selected = mru.length > 1 ? mru[1] : mru[0] || null
+        return {
+          winTabOpen: true,
+          winTabCancelled: false,
+          winTabSelectedPanelId: selected,
+          winTabSessionPanels: mru,
+        }
+      }),
+      closeWinTabSwitcher: (commit) => set(() => {
+        if (!commit) return { winTabOpen: false, winTabCancelled: true, winTabSelectedPanelId: null }
+        return { winTabOpen: false, winTabCancelled: false, winTabSelectedPanelId: null }
+      }),
+      cycleWinTabSelection: (direction) => set(state => {
+        const idx = state.winTabSessionPanels.indexOf(state.winTabSelectedPanelId || '')
+        const next = (idx + direction + state.winTabSessionPanels.length) % state.winTabSessionPanels.length
+        return { winTabSelectedPanelId: state.winTabSessionPanels[next] }
+      }),
+      selectWinTabPanel: (idx) => set(state => {
+        if (idx >= 0 && idx < state.winTabSessionPanels.length) {
+          return { winTabSelectedPanelId: state.winTabSessionPanels[idx] }
+        }
+        return state
+      }),
+      setCursorWorldPos: (x, y) => set({ cursorWorldPos: { x, y } }),
 
       groupIntoRegion: (panelIds, regionName) => {
         const state = get()
@@ -1303,7 +1483,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         }
         set(s => ({
           canvasPresets: { ...s.canvasPresets, [id]: preset },
-          tabs: s.tabs.map(t => t.id === s.activeTabId ? { ...t, linkedPresetId: id } : t)
+          tabs: s.tabs.map(t => t.id === s.activeTabId ? { ...t, linkedPresetId: id, lastSavedAt: Date.now() } : t)
         }))
         return id
       },
@@ -1313,7 +1493,10 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         const preset = state.canvasPresets[id]
         if (!preset) return
         const updated: CanvasPreset = { ...preset, savedAt: Date.now(), panels: state.panels, annotations: state.tabs.find(t => t.id === state.activeTabId)?.annotations, viewport: state.viewport }
-        set(s => ({ canvasPresets: { ...s.canvasPresets, [id]: updated } }))
+        set(s => ({
+          canvasPresets: { ...s.canvasPresets, [id]: updated },
+          tabs: s.tabs.map(t => t.id === s.activeTabId ? { ...t, lastSavedAt: Date.now() } : t)
+        }))
       },
 
       loadCanvasPreset: (id) => {
@@ -1327,15 +1510,18 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             ? { ...p, settings: { ...(p.settings || {}), lazyLoad: true } }
             : { ...p }
         })
+        const fitted = fitViewportToPanels(panels)
         const tab: WorkspaceTab = {
           id: `tab-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
           title: preset.name,
           panels,
           annotations: preset.annotations ? [...preset.annotations] : undefined,
-          viewport: preset.viewport,
+          viewport: fitted,
           selectedPanelIds: [],
           createdAt: Date.now(),
-          linkedPresetId: id
+          linkedPresetId: id,
+          lastSavedAt: Date.now(),
+          lastEditedAt: 0
         }
         set(s => ({
           tabs: [...s.tabs, tab],
@@ -1473,7 +1659,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
     {
       name: 'worktree-studio-workspace',
       storage: createJSONStorage(() => dualStorage),
-      version: 4,
+      version: 5,
       partialize: (state) => {
         const nonScratchTabs = state.tabs.filter(t => t.kind !== 'scratchpad')
         const activeIsScratch = state.tabs.find(t => t.id === state.activeTabId)?.kind === 'scratchpad'
@@ -1499,10 +1685,15 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         }
       },
       // v2: scrub retired gold/amber colors. v3: force snapToGrid off. v4: add canvasPresets. v5: snapToGrid removed.
-      migrate: (persisted: unknown) => {
+      // v5: remove retired 'tokens' and 'notes' sidebar sections.
+      migrate: (persisted: unknown, version: number) => {
         const RETIRED = new Set(['#d4a017', '#ffd36a', '#ffc517', '#ffbd2e'])
         const scrub = (c?: string) => (c && RETIRED.has(c.toLowerCase()) ? '' : c)
-        const data = persisted as { panels?: Record<string, Panel>; tabs?: WorkspaceTab[]; canvasPresets?: Record<string, CanvasPreset> }
+        const data = persisted as {
+          panels?: Record<string, Panel>; tabs?: WorkspaceTab[];
+          canvasPresets?: Record<string, CanvasPreset>;
+          sidebarSection?: string; hiddenSidebarSections?: string[]
+        }
         if (data?.panels) {
           Object.values(data.panels).forEach(p => { if (p.color) p.color = scrub(p.color) })
         }
@@ -1513,6 +1704,16 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           })
         }
         if (data && !data.canvasPresets) data.canvasPresets = {}
+        if (version < 5) {
+          if (data.sidebarSection === 'tokens' || data.sidebarSection === 'notes') {
+            data.sidebarSection = 'explorer'
+          }
+          if (data.hiddenSidebarSections) {
+            data.hiddenSidebarSections = data.hiddenSidebarSections.filter(
+              s => s !== 'tokens' && s !== 'notes'
+            )
+          }
+        }
         return data as WorkspaceState
       }
     }

@@ -10,6 +10,8 @@ import HelpOverlay from './components/HelpOverlay'
 import EmptyState from './components/EmptyState'
 import JumpOverlay from './components/JumpOverlay'
 import PopoutWindow from './components/PopoutWindow'
+import PanelSwitcher from './components/PanelSwitcher'
+import WinTabSwitcher from './components/WinTabSwitcher'
 import { useWorkspaceStore } from './store/workspaceStore'
 import { executeWorkspaceCommand, WorkspaceCommand, fitItemsToViewport } from './workspaceCommands'
 import './App.css'
@@ -35,6 +37,8 @@ function MainAppShell() {
     cycleTheme,
     undo,
     redo,
+    undoAnnotation,
+    redoAnnotation,
     theme,
     panels,
     tabs,
@@ -45,7 +49,11 @@ function MainAppShell() {
     setViewport,
     chromeVisible,
     toggleChrome,
-    toggleAnnotateMode
+    toggleAnnotateMode,
+    togglePanelSwitcher,
+    openWinTabSwitcher,
+    closeWinTabSwitcher,
+    cycleWinTabSelection
   } = useWorkspaceStore()
 
   useEffect(() => { initialize() }, [initialize])
@@ -252,29 +260,9 @@ function MainAppShell() {
             const s = useWorkspaceStore.getState()
             const p = s.panels[pid]
             if (p) {
-              window.dispatchEvent(new CustomEvent('wts-smooth-viewport'))
-              const zoom = 1
-              setViewport({
-                zoom,
-                x: window.innerWidth / 2 - (p.x + p.width / 2) * zoom,
-                y: window.innerHeight / 2 - (p.y + p.height / 2) * zoom
-              })
               selectPanel(pid)
-            } else {
-              // Annotation — look in current tab's annotations.
-              const tab = s.tabs.find(t => t.id === s.activeTabId)
-              const a = tab?.annotations?.find(aa => aa.id === pid)
-              if (a) {
-                window.dispatchEvent(new CustomEvent('wts-smooth-viewport'))
-                const ax = a.x + (a.width || 100) / 2
-                const ay = a.y + (a.height || 24) / 2
-                setViewport({
-                  zoom: 1,
-                  x: window.innerWidth / 2 - ax,
-                  y: window.innerHeight / 2 - ay
-                })
-                s.selectAnnotation(pid)
-              }
+              s.enterFocusMode()
+              executeWorkspaceCommand('focus-selected')
             }
             setJumpMode(false)
             return
@@ -289,22 +277,14 @@ function MainAppShell() {
       if (!isTextInput && e.key === 'Tab' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
         const state = useWorkspaceStore.getState()
         const panels = Object.values(state.panels).filter(p => p.type !== 'region')
-        const tab = state.tabs.find(t => t.id === state.activeTabId)
-        const annos = (tab?.annotations || []).filter(a =>
-          a.type === 'sticky' || a.type === 'label' || a.type === 'image'
-        )
-        type JumpItem = { id: string; x: number; y: number; width: number; height: number; kind: 'panel' | 'anno' }
-        const all: JumpItem[] = [
-          ...panels.map(p => ({ id: p.id, x: p.x, y: p.y, width: p.width, height: p.height, kind: 'panel' as const })),
-          ...annos.map(a => ({ id: a.id, x: a.x, y: a.y, width: a.width || 100, height: a.height || 24, kind: 'anno' as const })),
-        ].sort((a, b) => a.y - b.y || a.x - b.x)
+          .sort((a, b) => a.y - b.y || a.x - b.x)
 
-        if (all.length > 0) {
+        if (panels.length > 0) {
           e.preventDefault()
-          fitItemsToViewport(all)
+          fitItemsToViewport(panels)
           const letters: Record<string, string> = {}
-          all.slice(0, JUMP_LETTERS.length).forEach((item, i) => {
-            letters[JUMP_LETTERS[i]] = item.id
+          panels.slice(0, JUMP_LETTERS.length).forEach((p, i) => {
+            letters[JUMP_LETTERS[i]] = p.id
           })
           window.setTimeout(() => {
             const stillThere = useWorkspaceStore.getState()
@@ -314,9 +294,26 @@ function MainAppShell() {
         }
       }
 
+      // Ctrl+Tab / Ctrl+Shift+Tab → MRU panel switcher.
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Tab' && !e.metaKey) {
+        e.preventDefault()
+        togglePanelSwitcher()
+        return
+      }
+
+      // Meta+Tab → Win+Tab Alt+Tab-style switcher.
+      if (e.metaKey && e.key === 'Tab' && !e.ctrlKey) {
+        e.preventDefault()
+        openWinTabSwitcher()
+        return
+      }
+
       // Alt+Arrow → resize selected panel(s). Alt+Shift+Arrow → shrink instead of grow.
-      // Doesn't fire inside webview / textarea (browser keeps Alt+← / Alt+→ for back/forward).
-      if (!isTextInput && !isInsidePanelBody && e.altKey && !e.ctrlKey && !e.metaKey &&
+      // Block when a switcher is open.
+      const live = useWorkspaceStore.getState()
+      if (live.panelSwitcherOpen || live.winTabOpen) {
+        // Let the switcher handle all keys.
+      } else if (!isTextInput && !isInsidePanelBody && e.altKey && !e.ctrlKey && !e.metaKey &&
           (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
         const state = useWorkspaceStore.getState()
         const targets = state.selectedPanelIds.map(id => state.panels[id]).filter(Boolean)
@@ -344,7 +341,10 @@ function MainAppShell() {
       }
 
       // Ctrl+Arrow → move selected panel(s); if no selection, pan viewport.
-      if (!isTextInput && !isInsidePanelBody && (e.ctrlKey || e.metaKey) && !e.altKey &&
+      // Block when a switcher is open.
+      if (live.panelSwitcherOpen || live.winTabOpen) {
+        // Let the switcher handle all keys.
+      } else if (!isTextInput && !isInsidePanelBody && (e.ctrlKey || e.metaKey) && !e.altKey &&
           (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
         e.preventDefault()
         const state = useWorkspaceStore.getState()
@@ -379,7 +379,10 @@ function MainAppShell() {
       }
 
       // Arrow-key spatial navigation: nearest panel in direction.
-      if (!isTextInput && !e.ctrlKey && !e.metaKey && !e.altKey &&
+      // Block when a switcher is open.
+      if (live.panelSwitcherOpen || live.winTabOpen) {
+        // Let the switcher handle all keys.
+      } else if (!isTextInput && !e.ctrlKey && !e.metaKey && !e.altKey &&
           (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
         const state = useWorkspaceStore.getState()
         if (state.selectedPanelIds.length === 1) {
@@ -491,26 +494,7 @@ function MainAppShell() {
             const state = useWorkspaceStore.getState()
             // Distraction-free: hide top bar + status bar + minimap on F focus.
             state.enterFocusMode()
-            const selected = state.selectedPanelIds.map(id => state.panels[id]).filter(Boolean)
-            const single = selected.length === 1 ? selected[0] : null
-            const bigType = single && (single.type === 'browser' || single.type === 'editor')
-            if (bigType && single) {
-              // Near-fullscreen focus for browser/editor — tight 32px padding so the IDE/page
-              // gets almost the entire screen.
-              const padding = 32
-              const zoom = Math.min(
-                (window.innerWidth - padding * 2) / Math.max(single.width, 1),
-                (window.innerHeight - padding * 2) / Math.max(single.height, 1)
-              )
-              window.dispatchEvent(new CustomEvent('wts-smooth-viewport'))
-              state.setViewport({
-                zoom,
-                x: window.innerWidth / 2 - (single.x + single.width / 2) * zoom,
-                y: window.innerHeight / 2 - (single.y + single.height / 2) * zoom
-              })
-            } else {
-              executeWorkspaceCommand('focus-selected')
-            }
+            executeWorkspaceCommand('focus-selected')
             return
           }
         }
@@ -548,9 +532,13 @@ function MainAppShell() {
       } else if (k === 'b' && !e.shiftKey) {
         e.preventDefault(); executeWorkspaceCommand('new-browser')
       } else if (k === 'z' && !e.shiftKey) {
-        e.preventDefault(); undo()
+        e.preventDefault()
+        const s = useWorkspaceStore.getState()
+        if (s.annotateMode && s.annotationPast.length > 0) { s.undoAnnotation() } else { undo() }
       } else if ((k === 'z' && e.shiftKey) || k === 'y') {
-        e.preventDefault(); redo()
+        e.preventDefault()
+        const s = useWorkspaceStore.getState()
+        if (s.annotateMode && s.annotationFuture.length > 0) { s.redoAnnotation() } else { redo() }
       } else if (k === 't' && e.shiftKey) {
         e.preventDefault(); cycleTheme()
       } else if (k === '\\') {
@@ -559,6 +547,8 @@ function MainAppShell() {
         e.preventDefault(); useWorkspaceStore.getState().loadPreset('life')
       } else if (k === 'k' && e.shiftKey) {
         e.preventDefault(); useWorkspaceStore.getState().loadPreset('no-life')
+      } else if (k === 'a' && e.shiftKey) {
+        e.preventDefault(); executeWorkspaceCommand('arrange-selected')
       } else if (k === ' ' && e.shiftKey) {
         e.preventDefault(); useWorkspaceStore.getState().findOrCreateScratchpad()
       }
@@ -568,7 +558,7 @@ function MainAppShell() {
     window.addEventListener('keydown', handleKeyDown, true)
     return () => window.removeEventListener('keydown', handleKeyDown, true)
   // panels/selectedPanelIds/updatePanel/jumpMode omitted — handler reads live state via getState()
-  }, [toggleCommandPalette, togglePanelFinder, toggleOutliner, toggleHelp, cycleTheme, undo, redo, toggleMinimap, setJumpMode, selectPanel, setViewport, toggleChrome, toggleAnnotateMode])
+  }, [toggleCommandPalette, togglePanelFinder, toggleOutliner, toggleHelp, cycleTheme, undo, redo, undoAnnotation, redoAnnotation, toggleMinimap, setJumpMode, selectPanel, setViewport, toggleChrome, toggleAnnotateMode, togglePanelSwitcher, openWinTabSwitcher, closeWinTabSwitcher, cycleWinTabSelection])
 
   useEffect(() => {
     const validCommands = new Set<WorkspaceCommand>([
@@ -579,7 +569,7 @@ function MainAppShell() {
       'distribute-horizontal', 'distribute-vertical',
       'group-region', 'ungroup-region',
       'rename-selected', 'toggle-lock', 'toggle-minimize', 'bring-front', 'send-back', 'toggle-pin-front', 'focus-selected',
-      'toggle-help'
+      'toggle-help', 'arrange-selected'
     ])
 
     const removeListener = window.electronAPI?.onWorkspaceCommand?.((command) => {
@@ -645,6 +635,8 @@ function MainAppShell() {
       <SettingsPane />
       <HelpOverlay />
       <JumpOverlay />
+      <PanelSwitcher />
+      <WinTabSwitcher />
     </div>
   )
 }

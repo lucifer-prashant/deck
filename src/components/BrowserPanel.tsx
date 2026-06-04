@@ -44,9 +44,14 @@ const CLOSED_STACK_LIMIT = 10
 const normalizeUrl = (input: string): string => {
   const trimmed = input.trim()
   if (!trimmed) return DEFAULT_HOME
+  // Already has a protocol — use as-is.
   if (/^[a-z][a-z0-9+\-.]*:/i.test(trimmed)) return trimmed
+  // Looks like a domain (e.g. github.com, example.com/path).
   if (/^[\w-]+(\.[\w-]+)+(\/.*)?$/.test(trimmed)) return `https://${trimmed}`
-  return `https://www.google.com/search?q=${encodeURIComponent(trimmed)}`
+  // Has spaces or special chars — likely a search query.
+  if (/\s/.test(trimmed)) return `https://www.google.com/search?q=${encodeURIComponent(trimmed)}`
+  // Fallback: could be a localhost dev server or short domain.
+  return `https://${trimmed}`
 }
 
 const makeTab = (url = DEFAULT_HOME, incognito = false): BrowserTab => ({
@@ -90,7 +95,7 @@ interface PanelSettings {
   // Lazy-load: don't spin up the webview until the user clicks the placeholder. Saves
   // hundreds of MB of RAM per preset panel until they're actually used.
   lazyLoad?: boolean
-  browserCommand?: { name: 'back' | 'forward' | 'reload' | 'open-external'; nonce: number }
+  browserCommand?: { name: 'back' | 'forward' | 'reload' | 'open-external' | 'zoom-in' | 'zoom-out' | 'zoom-reset' | 'new-tab' | 'close-tab' | 'next-tab' | 'prev-tab' | 'view-source' | 'find-in-page' | 'print'; nonce: number }
 }
 
 const BrowserPanel: React.FC<Props> = ({ panel }) => {
@@ -228,18 +233,6 @@ const BrowserPanel: React.FC<Props> = ({ panel }) => {
     } catch { /* */ }
   }, [])
 
-  useEffect(() => {
-    const command = browserCommand
-    if (!command) return
-    if (command.name === 'back') back()
-    else if (command.name === 'forward') forward()
-    else if (command.name === 'reload') reload()
-    else if (command.name === 'open-external') openActiveExternal()
-    updatePanel(panel.id, {
-      settings: { ...(panel.settings || {}), browserCommand: undefined }
-    }, { skipHistory: true })
-  }, [browserCommand, back, forward, reload, openActiveExternal, panel.id, panel.settings, updatePanel])
-
   const zoom = useCallback((dir: 'in' | 'out' | 'reset') => {
     const wv = activeWv()
     if (!wv) return
@@ -250,6 +243,36 @@ const BrowserPanel: React.FC<Props> = ({ panel }) => {
       setTabs(ts => ts.map(t => t.id === activeIdRef.current ? { ...t, zoom: next } : t))
     } catch { /* */ }
   }, [])
+
+  // Execute browser commands triggered from context menu (kiosk mode).
+  useEffect(() => {
+    const command = browserCommand
+    if (!command) return
+    if (command.name === 'back') back()
+    else if (command.name === 'forward') forward()
+    else if (command.name === 'reload') reload()
+    else if (command.name === 'open-external') openActiveExternal()
+    else if (command.name === 'zoom-in') zoom('in')
+    else if (command.name === 'zoom-out') zoom('out')
+    else if (command.name === 'zoom-reset') zoom('reset')
+    else if (command.name === 'new-tab') addTab()
+    else if (command.name === 'close-tab') closeTab(activeIdRef.current)
+    else if (command.name === 'next-tab') cycleTab(1)
+    else if (command.name === 'prev-tab') cycleTab(-1)
+    else if (command.name === 'view-source') {
+      const wv = activeWv()
+      try { const u = wv?.getURL() || ''; if (u) addTab(`view-source:${u}`) } catch { /* */ }
+    }
+    else if (command.name === 'find-in-page') setFindOpen(true)
+    else if (command.name === 'print') {
+      const wv = activeWv()
+      try { wv?.print({}) } catch { /* */ }
+    }
+    updatePanel(panel.id, {
+      settings: { ...(panel.settings || {}), browserCommand: undefined }
+    }, { skipHistory: true })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [browserCommand])
 
   const focusUrl = useCallback(() => {
     urlInputRef.current?.focus()
@@ -508,6 +531,18 @@ const BrowserPanel: React.FC<Props> = ({ panel }) => {
           className="bp-url"
           value={draftUrl}
           onChange={(e) => setDraftUrl(e.target.value)}
+          onPaste={(e) => {
+            // Explicitly handle paste so pasted URLs work reliably.
+            const text = e.clipboardData.getData('text/plain')?.trim()
+            if (text) {
+              e.preventDefault()
+              const normalized = normalizeUrl(text)
+              setDraftUrl(normalized)
+              // Auto-navigate after paste.
+              const wv = activeWv()
+              if (wv) { try { wv.loadURL(normalized) } catch { /* */ } }
+            }
+          }}
           onFocus={(e) => e.target.select()}
           onKeyDown={(e) => {
             // Browser-like shortcuts should fire even from inside the URL bar.

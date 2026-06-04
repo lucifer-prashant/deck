@@ -1,0 +1,158 @@
+.wintab-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(8px);
+  z-index: 20000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: wintab-fade 100ms ease-out;
+}
+
+@keyframes wintab-fade {
+  from { opacity: 0 }
+  to   { opacity: 1 }
+}
+
+.wintab-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  max-width: 90vw;
+  animation: wintab-slide 120ms ease-out;
+}
+
+@keyframes wintab-slide {
+  from { opacity: 0; transform: scale(0.95) translateY(8px) }
+  to   { opacity: 1; transform: scale(1) translateY(0) }
+}
+
+.wintab-row {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.wintab-card {
+  width: 140px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(30, 32, 38, 0.92);
+  border: 2px solid rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+  transition: all 0.12s ease;
+  position: relative;
+  user-select: none;
+}
+
+.wintab-card:hover {
+  border-color: rgba(255, 255, 255, 0.15);
+  background: rgba(36, 38, 46, 0.95);
+}
+
+.wintab-card.selected {
+  border-color: #4dabe8;
+  background: rgba(77, 171, 232, 0.12);
+  box-shadow: 0 0 20px rgba(77, 171, 232, 0.2), 0 4px 24px rgba(0, 0, 0, 0.3);
+  transform: scale(1.04);
+}
+
+.wintab-card.current {
+  opacity: 0.45;
+}
+
+.wintab-card.current.selected {
+  opacity: 1;
+}
+
+.wintab-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.wintab-icon {
+  font-size: 16px;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wintab-num {
+  font-size: 9px;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+  color: rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.06);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.wintab-card.selected .wintab-num {
+  color: #4dabe8;
+  background: rgba(77, 171, 232, 0.15);
+}
+
+.wintab-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #e6e8ec;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 2px;
+}
+
+.wintab-context {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.4);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 4px;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.wintab-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+}
+
+.wintab-type {
+  font-size: 8px;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.wintab-type.terminal { background: rgba(45, 138, 78, 0.25); color: #6ee7a3; }
+.wintab-type.editor   { background: rgba(0, 120, 212, 0.25); color: #6abef8; }
+.wintab-type.browser  { background: rgba(108, 45, 130, 0.3); color: #d5a3e8; }
+.wintab-type.note     { background: rgba(255, 255, 255, 0.08); color: #ccc; }
+
+.wintab-health {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.wintab-health.pulse {
+  animation: wintab-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes wintab-pulse {
+  0%, 100% { opacity: 1 }
+  50% { opacity: 0.3 }
+}

@@ -29,10 +29,10 @@ const PanelContextMenu: React.FC<Props> = ({ panel, x, y, onClose, onRename }) =
   const menuRef = useRef<HTMLDivElement>(null)
   const [submenu, setSubmenu] = useState<Submenu>(null)
   const { updatePanel, deletePanel, selectedPanelIds, selectPanel, panels } = useWorkspaceStore()
-  const isPresetBrowser =
-    (panel.id.startsWith('preset-life-') || panel.id.startsWith('preset-no-life-')) &&
-    panel.type === 'browser'
-  const isAsleep = panel.type === 'browser' && !!(panel.settings as { lazyLoad?: boolean } | undefined)?.lazyLoad
+  const isAsleep = (panel.type === 'browser' || panel.type === 'editor') &&
+    !!(panel.settings as { lazyLoad?: boolean } | undefined)?.lazyLoad
+  const isKiosk = panel.type === 'browser' &&
+    !!(panel.settings as { kiosk?: boolean } | undefined)?.kiosk
 
   const isAtFront = useMemo(() => {
     const maxZ = Math.max(1, ...Object.values(panels).map(p => p.zIndex || 1))
@@ -90,6 +90,24 @@ const PanelContextMenu: React.FC<Props> = ({ panel, x, y, onClose, onRename }) =
   return createPortal(
     <div ref={menuRef} className="ctx-menu" style={{ left, top }} onContextMenu={(e) => e.preventDefault()}>
 
+      {/* ── Kiosk nav toolbar — top of menu for app-mode browser panels ── */}
+      {panel.type === 'browser' && isKiosk && (
+        <>
+          <div className="ctx-toolbar">
+            <button className="ctx-icon-btn" title="Back (Alt+←)" onClick={run(() => updatePanel(panel.id, {
+              settings: { ...(panel.settings || {}), browserCommand: { name: 'back', nonce: Date.now() } }
+            }, { skipHistory: true }))}>‹</button>
+            <button className="ctx-icon-btn reload" title="Reload (F5)" onClick={run(() => updatePanel(panel.id, {
+              settings: { ...(panel.settings || {}), browserCommand: { name: 'reload', nonce: Date.now() } }
+            }, { skipHistory: true }))}>↻</button>
+            <button className="ctx-icon-btn" title="Forward (Alt+→)" onClick={run(() => updatePanel(panel.id, {
+              settings: { ...(panel.settings || {}), browserCommand: { name: 'forward', nonce: Date.now() } }
+            }, { skipHistory: true }))}>›</button>
+          </div>
+          <div className="ctx-sep" />
+        </>
+      )}
+
       {/* ── Core actions ── */}
       <button className="ctx-item" onClick={() => { onRename(); onClose() }}>
         <span>Rename</span><span className="ctx-kbd">F2</span>
@@ -112,9 +130,6 @@ const PanelContextMenu: React.FC<Props> = ({ panel, x, y, onClose, onRename }) =
       <button className="ctx-item" onClick={run(() => updatePanel(panel.id, { locked: !panel.locked }))}>
         <span>{panel.locked ? 'Unlock' : 'Lock'}</span>
       </button>
-      <button className="ctx-item" onClick={run(() => updatePanel(panel.id, { minimized: !panel.minimized }))}>
-        <span>{panel.minimized ? 'Restore' : 'Minimize'}</span>
-      </button>
       <button className="ctx-item" onClick={run(() => updatePanel(panel.id, { starred: !panel.starred }))}>
         <span>{panel.starred ? 'Unstar' : 'Star'}</span>
         {panel.starred && <span className="ctx-kbd">★</span>}
@@ -125,12 +140,11 @@ const PanelContextMenu: React.FC<Props> = ({ panel, x, y, onClose, onRename }) =
       {/* ── Arrange submenu ── */}
       <div
         className={`ctx-item ctx-submenu-trigger ${submenu === 'arrange' ? 'sub-open' : ''}`}
-        onMouseEnter={() => setSubmenu('arrange')}
-        onMouseLeave={() => setSubmenu(null)}
+        onClick={(e) => { e.stopPropagation(); setSubmenu(s => s === 'arrange' ? null : 'arrange') }}
       >
         <span>Arrange</span><span className="ctx-sub-arrow">▸</span>
         {submenu === 'arrange' && (
-          <div className="ctx-submenu" onMouseEnter={() => setSubmenu('arrange')} onMouseLeave={() => setSubmenu(null)}>
+          <div className="ctx-submenu">
             <button className="ctx-item" onClick={run(raise)} disabled={isAtFront}>
               <span>Bring to front</span>
               {isAtFront && <span className="ctx-kbd">at top</span>}
@@ -151,31 +165,31 @@ const PanelContextMenu: React.FC<Props> = ({ panel, x, y, onClose, onRename }) =
         )}
       </div>
 
-      {/* ── Browser actions ── */}
-      {panel.type === 'browser' && (
+      {/* ── Browser / Editor actions ── */}
+      {(panel.type === 'browser' || panel.type === 'editor') && (
         <>
           <button className="ctx-item" onClick={run(() => updatePanel(panel.id, {
             settings: { ...(panel.settings || {}), lazyLoad: !isAsleep }
           }, { skipHistory: true }))}>
             <span>{isAsleep ? 'Wake panel' : 'Put to sleep'}</span>
           </button>
-          {isPresetBrowser && !isAsleep && (
+          {panel.type === 'browser' && (
             <>
               <button className="ctx-item" onClick={run(() => updatePanel(panel.id, {
-                settings: { ...(panel.settings || {}), browserCommand: { name: 'reload', nonce: Date.now() } }
+                settings: { ...(panel.settings || {}), kiosk: !isKiosk }
               }, { skipHistory: true }))}>
-                <span>Reload view</span>
+                <span>{isKiosk ? 'Exit app mode' : 'App mode'}</span>
               </button>
-              <button className="ctx-item" onClick={run(() => updatePanel(panel.id, {
-                settings: { ...(panel.settings || {}), browserCommand: { name: 'back', nonce: Date.now() } }
-              }, { skipHistory: true }))}>
-                <span>Go back</span>
-              </button>
-              <button className="ctx-item" onClick={run(() => updatePanel(panel.id, {
-                settings: { ...(panel.settings || {}), browserCommand: { name: 'forward', nonce: Date.now() } }
-              }, { skipHistory: true }))}>
-                <span>Go forward</span>
-              </button>
+
+              {/* Kiosk-only: open external — nav toolbar is already at top */}
+              {isKiosk && (
+                <button className="ctx-item" onClick={run(() => {
+                  const url = (panel.settings as { browserTabs?: Array<{ url?: string }> } | undefined)?.browserTabs?.[0]?.url
+                  if (url) window.electronAPI?.openExternal?.(url)
+                })}>
+                  <span>Open in system browser</span><span className="ctx-kbd">⇱</span>
+                </button>
+              )}
             </>
           )}
         </>

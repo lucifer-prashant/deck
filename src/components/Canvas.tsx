@@ -44,6 +44,7 @@ const Canvas: React.FC = () => {
     selectMultiple,
     clearSelection,
     setViewport,
+    setCursorWorldPos,
     movePanel,
     resizePanel,
     deletePanel,
@@ -163,7 +164,15 @@ const Canvas: React.FC = () => {
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
     const rect = containerRef.current?.getBoundingClientRect()
     if (rect) {
-      lastMouseRef.current = { x: e.clientX - rect.left, y: e.clientY - rect.top }
+      const screenX = e.clientX - rect.left
+      const screenY = e.clientY - rect.top
+      lastMouseRef.current = { x: screenX, y: screenY }
+      // Track world coordinates for panel spawning.
+      const v = viewportRef.current
+      setCursorWorldPos(
+        (screenX - v.x) / v.zoom,
+        (screenY - v.y) / v.zoom
+      )
     }
     if (selectionBox) {
       const rect = containerRef.current?.getBoundingClientRect()
@@ -186,7 +195,7 @@ const Canvas: React.FC = () => {
         y: e.clientY - panStart.y
       })
     }
-  }, [isPanning, panStart, selectionBox, setViewport])
+  }, [isPanning, panStart, selectionBox, setViewport, setCursorWorldPos])
 
   const handleMouseUp = useCallback(() => {
     if (selectionBox) {
@@ -478,11 +487,19 @@ const Canvas: React.FC = () => {
     const handler = (e: MouseEvent) => {
       const rect = containerRef.current?.getBoundingClientRect()
       if (!rect) return
-      lastMouseRef.current = { x: e.clientX - rect.left, y: e.clientY - rect.top }
+      const screenX = e.clientX - rect.left
+      const screenY = e.clientY - rect.top
+      lastMouseRef.current = { x: screenX, y: screenY }
+      // Track world coordinates for panel spawning.
+      const v = viewportRef.current
+      setCursorWorldPos(
+        (screenX - v.x) / v.zoom,
+        (screenY - v.y) / v.zoom
+      )
     }
     window.addEventListener('mousemove', handler, { passive: true })
     return () => window.removeEventListener('mousemove', handler)
-  }, [])
+  }, [setCursorWorldPos])
 
   // Native gesture (trackpad pinch) fallback for browsers that emit gesture events
   useEffect(() => {

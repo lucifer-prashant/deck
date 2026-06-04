@@ -1,4 +1,5 @@
 import { Panel, useWorkspaceStore } from './store/workspaceStore'
+import { grid, masonry, golden, clusterByType, type LayoutStrategy } from './layoutEngine'
 
 export type WorkspaceCommand =
   | 'new-terminal'
@@ -33,6 +34,10 @@ export type WorkspaceCommand =
   | 'stack-selected'
   | 'unstack-selected'
   | 'toggle-help'
+  | 'arrange-selected'
+
+// Last used layout strategy (persisted per session).
+let lastArrangeStrategy: LayoutStrategy = 'grid'
 
 const panelDefaults: Record<Panel['type'], Pick<Panel, 'width' | 'height' | 'title'> & { content?: string }> = {
   terminal: { width: 600, height: 400, title: 'Terminal' },
@@ -41,20 +46,18 @@ const panelDefaults: Record<Panel['type'], Pick<Panel, 'width' | 'height' | 'tit
   region: { width: 800, height: 600, title: 'Region' }
 }
 
-const getVisibleWorldCenter = (width: number, height: number) => {
-  const { viewport } = useWorkspaceStore.getState()
-  const screenCenterX = window.innerWidth / 2
-  const screenCenterY = window.innerHeight / 2
-
+const getSpawnPosition = (width: number, height: number) => {
+  const { cursorWorldPos } = useWorkspaceStore.getState()
+  // Spawn centered on cursor in world space.
   return {
-    x: (screenCenterX - viewport.x) / viewport.zoom - width / 2,
-    y: (screenCenterY - viewport.y) / viewport.zoom - height / 2
+    x: cursorWorldPos.x - width / 2,
+    y: cursorWorldPos.y - height / 2
   }
 }
 
 export const createPanelAtViewportCenter = (type: Panel['type']) => {
   const defaults = panelDefaults[type]
-  const position = getVisibleWorldCenter(defaults.width, defaults.height)
+  const position = getSpawnPosition(defaults.width, defaults.height)
   const id = `${type}-${Date.now()}`
 
   const panel = {
@@ -92,7 +95,7 @@ export const fitPanelsToViewport = (panels: Panel[]) => {
   }
 
   const padding = 96
-  const zoom = Math.max(0.25, Math.min(2, Math.min(
+  const zoom = Math.max(0.02, Math.min(2, Math.min(
     (window.innerWidth - padding * 2) / Math.max(bounds.width, 1),
     (window.innerHeight - padding * 2) / Math.max(bounds.height, 1)
   )))
@@ -115,7 +118,7 @@ export const fitItemsToViewport = (items: Array<{ x: number; y: number; width: n
 
   const padding = 96
   const store = useWorkspaceStore.getState()
-  const zoom = Math.max(0.25, Math.min(2, Math.min(
+  const zoom = Math.max(0.02, Math.min(2, Math.min(
     (window.innerWidth - padding * 2) / Math.max(bounds.width, 1),
     (window.innerHeight - padding * 2) / Math.max(bounds.height, 1)
   )))
@@ -386,20 +389,27 @@ export const executeWorkspaceCommand = (command: WorkspaceCommand) => {
       const bounds = getPanelBounds(selected)
       if (!bounds) return
       flagSmoothViewport()
-      const padding = 120
-      const zoom = selected.length === 1
-        ? Math.min(1.4, Math.max(0.8, Math.min(
-            (window.innerWidth - padding * 2) / Math.max(bounds.width, 1),
-            (window.innerHeight - padding * 2) / Math.max(bounds.height, 1)
-          )))
-        : Math.min(1.2, Math.max(0.4, Math.min(
-            (window.innerWidth - padding * 2) / Math.max(bounds.width, 1),
-            (window.innerHeight - padding * 2) / Math.max(bounds.height, 1)
-          )))
-      store.setViewport({
+      const s = useWorkspaceStore.getState()
+      // Sidebar is a fixed overlay — when open, usable width shrinks.
+      const sidebarW = s.sidebarOpen ? 320 : 0
+      const padX = 40
+      // Dynamic vertical padding — accounts for chrome/status bar visibility.
+      // In focus mode both are hidden, so we get the full viewport.
+      const chromePad = s.chromeVisible ? 44 : 8
+      const statusPad = s.statusBarVisible ? 32 : 8
+      const availW = window.innerWidth - sidebarW - padX * 2
+      const availH = window.innerHeight - chromePad - statusPad
+      // Fit-zoom: panel fills the tighter dimension.
+      const zoomX = availW / Math.max(bounds.width, 1)
+      const zoomY = availH / Math.max(bounds.height, 1)
+      const zoom = Math.max(0.1, Math.min(3.0, Math.min(zoomX, zoomY)))
+      // Center in the usable area.
+      const cx = bounds.x + bounds.width / 2
+      const cy = bounds.y + bounds.height / 2
+      s.setViewport({
         zoom,
-        x: window.innerWidth / 2 - (bounds.x + bounds.width / 2) * zoom,
-        y: window.innerHeight / 2 - (bounds.y + bounds.height / 2) * zoom
+        x: sidebarW + padX + availW / 2 - cx * zoom,
+        y: chromePad + availH / 2 - cy * zoom,
       })
       break
     }
@@ -415,5 +425,34 @@ export const executeWorkspaceCommand = (command: WorkspaceCommand) => {
     case 'toggle-help':
       store.toggleHelp()
       break
+    case 'arrange-selected': {
+      const selected = getSelectedPanels().filter(p => p.type !== 'region')
+      if (selected.length === 0) break
+      const bounds = getPanelBounds(selected)
+      if (!bounds) break
+      // Add some padding around the bounding box for the layout area.
+      const PAD = 40
+      const tx = bounds.x - PAD
+      const ty = bounds.y - PAD
+      const tw = bounds.width + PAD * 2
+      const th = bounds.height + PAD * 2
+
+      const layoutFn = {
+        grid: grid,
+        masonry: masonry,
+        golden: golden,
+        cluster: clusterByType,
+      }[lastArrangeStrategy] ?? grid
+
+      const result = layoutFn(selected, tx, ty, tw, th)
+      result.forEach((layout, id) => {
+        store.resizePanel(id, layout.width, layout.height)
+        store.movePanel(id, layout.x, layout.y)
+      })
+      // Cycle to next strategy for next invocation.
+      const strategies: LayoutStrategy[] = ['grid', 'masonry', 'golden', 'cluster']
+      lastArrangeStrategy = strategies[(strategies.indexOf(lastArrangeStrategy) + 1) % strategies.length]
+      break
+    }
   }
 }

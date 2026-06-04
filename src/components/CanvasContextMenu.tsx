@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useWorkspaceStore, type Panel } from '../store/workspaceStore'
 import { executeWorkspaceCommand } from '../workspaceCommands'
+import { grid, masonry, golden, clusterByType, type LayoutStrategy } from '../layoutEngine'
 import './PanelContextMenu.css'
 
 interface Props {
@@ -22,6 +23,7 @@ const TYPE_DEFAULTS: Record<Panel['type'], { width: number; height: number; titl
 const CanvasContextMenu: React.FC<Props> = ({ x, y, worldX, worldY, onClose }) => {
   const menuRef = useRef<HTMLDivElement>(null)
   const [showNew, setShowNew] = useState(false)
+  const [showArrange, setShowArrange] = useState(false)
   const { addPanel, selectPanel, addAnnotation } = useWorkspaceStore()
 
   useEffect(() => {
@@ -58,6 +60,26 @@ const CanvasContextMenu: React.FC<Props> = ({ x, y, worldX, worldY, onClose }) =
     onClose()
   }
 
+  const arrangeSelected = (strategy: LayoutStrategy) => {
+    const store = useWorkspaceStore.getState()
+    const selected = store.selectedPanelIds.map(id => store.panels[id]).filter((p): p is Panel => p && p.type !== 'region')
+    if (selected.length === 0) return
+    const allX = selected.map(p => p.x), allY = selected.map(p => p.y)
+    const allR = selected.map(p => p.x + p.width), allB = selected.map(p => p.y + p.height)
+    const bb = {
+      x: Math.min(...allX), y: Math.min(...allY),
+      width: Math.max(...allR) - Math.min(...allX),
+      height: Math.max(...allB) - Math.min(...allY),
+    }
+    const PAD = 40
+    const layoutFn = { grid, masonry, golden, cluster: clusterByType }[strategy] || grid
+    const result = layoutFn(selected, bb.x - PAD, bb.y - PAD, bb.width + PAD * 2, bb.height + PAD * 2)
+    result.forEach((layout: { x: number; y: number; width: number; height: number }, id: string) => {
+      store.resizePanel(id, layout.width, layout.height)
+      store.movePanel(id, layout.x, layout.y)
+    })
+  }
+
   const left = Math.max(6, Math.min(x, window.innerWidth - 246))
   const top = Math.max(6, Math.min(y, window.innerHeight - 386))
 
@@ -67,12 +89,11 @@ const CanvasContextMenu: React.FC<Props> = ({ x, y, worldX, worldY, onClose }) =
       {/* ── New panel submenu ── */}
       <div
         className={`ctx-item ctx-submenu-trigger ${showNew ? 'sub-open' : ''}`}
-        onMouseEnter={() => setShowNew(true)}
-        onMouseLeave={() => setShowNew(false)}
+        onClick={(e) => { e.stopPropagation(); setShowNew(s => !s) }}
       >
         <span>New</span><span className="ctx-kbd ctx-sub-arrow">▸</span>
         {showNew && (
-          <div className="ctx-submenu" onMouseEnter={() => setShowNew(true)} onMouseLeave={() => setShowNew(false)}>
+          <div className="ctx-submenu">
             <button className="ctx-item" onClick={createAt('terminal')}><span>Terminal</span><span className="ctx-kbd">Ctrl+T</span></button>
             <button className="ctx-item" onClick={createAt('editor')}><span>Editor</span><span className="ctx-kbd">Ctrl+E</span></button>
             <button className="ctx-item" onClick={createAt('browser')}><span>Browser</span></button>
@@ -107,6 +128,26 @@ const CanvasContextMenu: React.FC<Props> = ({ x, y, worldX, worldY, onClose }) =
       }}><span>Text label</span></button>
 
       <div className="ctx-sep" />
+
+      <div className="ctx-sep" />
+
+      {/* ── Arrange submenu ── */}
+      <div
+        className={`ctx-item ctx-submenu-trigger ${showArrange ? 'sub-open' : ''}`}
+        onClick={(e) => { e.stopPropagation(); setShowArrange(s => !s) }}
+      >
+        <span>Arrange selected</span><span className="ctx-kbd ctx-sub-arrow">▸</span>
+        {showArrange && (
+          <div className="ctx-submenu">
+            {([['grid', 'Grid'], ['masonry', 'Masonry'], ['golden', 'Golden ratio'], ['cluster', 'Cluster by type']] as [LayoutStrategy, string][]).map(([key, label]) => (
+              <button key={key} className="ctx-item" onClick={() => {
+                arrangeSelected(key)
+                onClose()
+              }}><span>{label}</span></button>
+            ))}
+          </div>
+        )}
+      </div>
 
       <button className="ctx-item" onClick={cmd('select-all')}><span>Select all</span><span className="ctx-kbd">Ctrl+A</span></button>
       <button className="ctx-item" onClick={cmd('fit-all')}><span>Fit all panels</span></button>
