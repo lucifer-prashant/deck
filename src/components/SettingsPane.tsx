@@ -144,6 +144,12 @@ const SettingsPane: React.FC = () => {
 	const [recordedCombo, setRecordedCombo] = useState("")
 	const [tempBgColor, setTempBgColor] = useState(prefs.canvasBgColor || "#1f2024")
 	const [shortcutSearch, setShortcutSearch] = useState("")
+	// Current OS platform — used for platform-specific UI copy (e.g. shell path hints).
+	const [platform, setPlatform] = useState<string>('')
+
+	useEffect(() => {
+		window.electronAPI?.getPlatform().then(setPlatform).catch(() => {})
+	}, [])
 
 	useEffect(() => {
 		setTempBgColor(prefs.canvasBgColor || "#1f2024")
@@ -401,14 +407,15 @@ const SettingsPane: React.FC = () => {
 
 								<Field
 									label="Suggested presets"
-									description="Switch to standard optimized background colors: Deep Blue, Slate Black, Pure White, or Creamy Pearl."
+									description="Switch to standard optimized background colors: Deep Blue, Slate Black, Pure White, Creamy Pearl, or Midnight."
 								>
 									<div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, width: '100%' }}>
 										{[
 											{ name: 'Deep Blue', color: '#0b132b' },
 											{ name: 'Slate Black', color: '#0c0c0e' },
 											{ name: 'Pure White', color: '#ffffff' },
-											{ name: 'Creamy Pearl', color: '#f5f2eb' }
+											{ name: 'Creamy Pearl', color: '#f5f2eb' },
+											{ name: 'Midnight', color: '#0d1117' }
 										].map((preset) => (
 											<div
 												key={preset.name}
@@ -817,7 +824,10 @@ const SettingsPane: React.FC = () => {
 								</Field>
 								<Field
 									label="Terminal Shell Path"
-									description="Absolute path to the system shell executable to spawn for terminal panels (e.g. /bin/bash or /usr/bin/zsh). Leave empty to use system default."
+									description={platform === 'win32'
+										? "Absolute path to the shell executable to spawn for terminal panels (e.g. powershell.exe or C:\\Windows\\System32\\cmd.exe). Leave empty to use system default."
+										: "Absolute path to the system shell executable to spawn for terminal panels (e.g. /bin/bash or /usr/bin/zsh). Leave empty to use system default."
+									}
 								>
 									<input
 										type="text"
@@ -827,7 +837,7 @@ const SettingsPane: React.FC = () => {
 												defaultTerminalShell: e.target.value,
 											})
 										}
-										placeholder="e.g. /bin/bash"
+										placeholder={platform === 'win32' ? 'e.g. powershell.exe' : 'e.g. /bin/bash'}
 										style={{ ...textInputStyle, flex: 1 }}
 									/>
 								</Field>

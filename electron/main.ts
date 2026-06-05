@@ -6,10 +6,20 @@ import { spawn, ChildProcess } from 'child_process'
 import * as net from 'net'
 import * as pty from 'node-pty'
 
+// ─── Platform helpers ────────────────────────────────────────────────────────
+// IS_WIN / PATH_SEP are used throughout to gate Windows-specific behaviour.
+// Every branch falls through to Linux/macOS behaviour by default so the app
+// keeps working exactly as before on non-Windows platforms.
+const IS_WIN = process.platform === 'win32'
+const PATH_SEP = IS_WIN ? ';' : ':'
+
 type PtySession = { proc: pty.IPty; panelId: string }
 const ptys = new Map<string, PtySession>()
 // Track which BrowserWindow owns each panel's pty so we send data only there.
 const ptyOwners = new Map<string, BrowserWindow>()
+// Store the initial cwd used when spawning each pty. On Windows we use this
+// as a best-effort answer to pty:cwd (no /proc equivalent exists there).
+const ptyCwds = new Map<string, string>()
 // Per-pty scrollback ring buffer (raw ANSI bytes). New windows subscribing to
 // an existing pty replay this buffer to populate their xterm with prior context.
 const ptyBuffers = new Map<string, string>()
@@ -252,8 +262,10 @@ function createWindow() {
 
 // Spoof a vanilla Chrome user agent on every webview. WhatsApp Web, some Google flows,
 // and a handful of other sites block Electron's default UA (which contains "Electron"
-// and our app name). Pretending to be plain Chrome 131 on Linux works everywhere.
-const CHROME_UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+// and our app name). Use the correct platform string so sites don't serve wrong content.
+const CHROME_UA = IS_WIN
+  ? 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+  : 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
 
 // Wire permissions + downloads + zoom + window-open for every webview that gets created.
 app.on('web-contents-created', (_evt, contents) => {
@@ -386,22 +398,39 @@ ipcMain.handle('get-webview-preload-path', () => {
 ipcMain.handle('pty:spawn', (e, args: { panelId: string; cwd?: string; cols?: number; rows?: number; shell?: string }) => {
   const { panelId } = args
   if (ptys.has(panelId)) return { ok: true, panelId }
-  const shellPath = args.shell || process.env.SHELL || '/bin/bash'
+
+  // Shell resolution:
+  //   Windows — prefer PowerShell, fall back to cmd.exe (from %COMSPEC%).
+  //   Unix    — honour $SHELL, fall back to bash.
+  const shellPath = args.shell
+    || (IS_WIN
+      ? (process.env.COMSPEC || 'cmd.exe')
+      : (process.env.SHELL || '/bin/bash'))
+
   const cwd = args.cwd && args.cwd.length ? args.cwd : homedir()
-  // Spawn as a LOGIN + INTERACTIVE shell so the user's full environment loads:
-  //   bash: ~/.bash_profile (which typically sources ~/.bashrc) → aliases, functions
-  //         like z/zoxide, fzf, PATH additions
-  //   zsh:  ~/.zprofile + ~/.zshrc → same idea
-  //   fish: --login → ~/.config/fish/config.fish
-  // Without -l, .bash_profile/.zprofile aren't read and user-defined commands miss.
-  const shellArgs: string[] = ['-l']
+
+  // Spawn args:
+  //   Unix    — '-l' gives a login shell so ~/.bash_profile / ~/.zshrc load.
+  //   Windows — no equivalent; cmd/powershell need no special args here.
+  const shellArgs: string[] = IS_WIN ? [] : ['-l']
+
+  // TERM / COLORTERM are Unix-only; injecting them on Windows causes issues
+  // with cmd.exe and some PowerShell modules.
+  const ptyEnv = IS_WIN
+    ? { ...process.env }
+    : { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor' }
+
   const proc = pty.spawn(shellPath, shellArgs, {
     name: 'xterm-256color',
     cols: args.cols || 80,
     rows: args.rows || 24,
     cwd,
-    env: { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor' }
+    env: ptyEnv
   })
+
+  // Store initial cwd so pty:cwd can return it on Windows (no /proc there).
+  ptyCwds.set(panelId, cwd)
+
   // Record which window owns this pty so data goes only there, not to all windows.
   const ownerWin = BrowserWindow.fromWebContents(e.sender)
   if (ownerWin) ptyOwners.set(panelId, ownerWin)
@@ -422,6 +451,7 @@ ipcMain.handle('pty:spawn', (e, args: { panelId: string; cwd?: string; cols?: nu
     ptys.delete(panelId)
     ptyBuffers.delete(panelId)
     ptyOwners.delete(panelId)
+    ptyCwds.delete(panelId)
   })
   ptys.set(panelId, { proc, panelId })
   return { ok: true, panelId, pid: proc.pid, cwd, shell: shellPath }
@@ -448,11 +478,22 @@ ipcMain.on('pty:kill', (_e, args: { panelId: string }) => {
   ptys.delete(args.panelId)
 })
 
-// Read current cwd of a pty's foreground process by following /proc/<pid>/cwd.
-// Linux only — that's the only platform we target right now. Returns null if unreadable.
+// Read the current working directory of a pty's foreground process.
+//
+// Linux:   readlink /proc/<pid>/cwd  — exact, follows nested child processes.
+// Windows: /proc doesn't exist. We return the initial spawn cwd as best-effort.
+//          True cwd tracking of arbitrary child processes on Windows requires
+//          kernel-level APIs (NtQueryInformationProcess). The initial cwd covers
+//          the common case (cd commands update PS1 but not the parent process).
 ipcMain.handle('pty:cwd', async (_e, panelId: string) => {
   const s = ptys.get(panelId)
   if (!s) return { ok: false, error: 'no pty' }
+  if (IS_WIN) {
+    // Return the last known cwd (set at spawn time; updated if the renderer
+    // explicitly calls pty:spawn again with a new cwd).
+    const cwd = ptyCwds.get(panelId)
+    return cwd ? { ok: true, cwd } : { ok: false, error: 'cwd unknown' }
+  }
   try {
     const cwd = await fsp.readlink(`/proc/${s.proc.pid}/cwd`)
     return { ok: true, cwd }
@@ -643,9 +684,11 @@ ipcMain.handle('shell:trash', async (_e, path: string) => {
 
 // ---- ripgrep / grep wrapper for global search ----
 const hasRg = (() => {
-  const PATH = (process.env.PATH || '').split(':')
-  for (const dir of PATH) {
-    if (existsSync(join(dir, 'rg'))) return true
+  // Use PATH_SEP so this works on both Windows (';') and Unix (':').
+  const rgBin = IS_WIN ? 'rg.exe' : 'rg'
+  const paths = (process.env.PATH || '').split(PATH_SEP)
+  for (const dir of paths) {
+    if (existsSync(join(dir, rgBin))) return true
   }
   return false
 })()
@@ -658,10 +701,20 @@ ipcMain.handle('search:files', async (_e, args: { root: string; query: string; m
 
   return new Promise<{ ok: boolean; results: Array<{ file: string; line: number; text: string }>; tool: string }>(resolve => {
     const results: Array<{ file: string; line: number; text: string }> = []
-    const cmd = hasRg ? 'rg' : 'grep'
+
+    // Tool selection:
+    //   rg (ripgrep)  — fast, cross-platform; preferred when installed.
+    //   grep          — Unix fallback.
+    //   findstr       — Windows built-in fallback (slower, less capable than grep).
+    const cmd = hasRg ? (IS_WIN ? 'rg.exe' : 'rg') : (IS_WIN ? 'findstr' : 'grep')
+
     const cmdArgs = hasRg
       ? ['--line-number', '--no-heading', '--color=never', '--max-count=20', '--max-filesize=2M', '-S', '--', q, root]
-      : ['-rn', '-I', '--exclude-dir=node_modules', '--exclude-dir=.git', '--exclude-dir=dist', '--exclude-dir=.next', '--', q, root]
+      : IS_WIN
+        // findstr: /s=recursive, /n=line numbers, /i=case-insensitive, /p=skip binary
+        ? ['/s', '/n', '/i', '/p', q, join(root, '*')]
+        : ['-rn', '-I', '--exclude-dir=node_modules', '--exclude-dir=.git', '--exclude-dir=dist', '--exclude-dir=.next', '--', q, root]
+
     const proc = spawn(cmd, cmdArgs, { stdio: ['ignore', 'pipe', 'pipe'] })
     let buf = ''
     const timeout = setTimeout(() => { try { proc.kill() } catch { /* ignore */ } }, 15000)
@@ -669,13 +722,14 @@ ipcMain.handle('search:files', async (_e, args: { root: string; query: string; m
       buf += d.toString()
       let idx
       while ((idx = buf.indexOf('\n')) !== -1) {
-        const line = buf.slice(0, idx)
+        const line = buf.slice(0, idx).trim()
         buf = buf.slice(idx + 1)
         if (results.length >= cap) {
           try { proc.kill() } catch { /* */ }
           break
         }
-        // format: <file>:<line>:<text>
+        // rg / grep format: <file>:<line>:<text>
+        // findstr format:   <file>:<line>:<text>  (same, conveniently)
         const m = line.match(/^([^:]+):(\d+):(.*)$/)
         if (m) results.push({ file: m[1], line: parseInt(m[2], 10), text: m[3] })
       }
@@ -912,21 +966,34 @@ let codeServerProc: ChildProcess | null = null
 let codeServerPort: number | null = null
 let codeServerStarting: Promise<{ ok: boolean; port?: number; url?: string; error?: string }> | null = null
 
-const CODE_SERVER_CANDIDATES = [
-  'code-server',
-  join(homedir(), '.local', 'bin', 'code-server'),
-  '/usr/bin/code-server',
-  '/usr/local/bin/code-server'
-]
+// code-server candidate paths — platform-specific.
+// On Windows, code-server is typically installed as a .cmd wrapper in
+// %LOCALAPPDATA%\Programs\code-server\bin\  (official installer) or
+// the Scoop/Chocolatey variants put it somewhere on PATH.
+const CODE_SERVER_CANDIDATES: string[] = IS_WIN
+  ? [
+      join(homedir(), 'AppData', 'Local', 'Programs', 'code-server', 'bin', 'code-server.cmd'),
+      join(homedir(), 'AppData', 'Local', 'Programs', 'code-server', 'code-server.cmd'),
+      join(homedir(), 'scoop', 'shims', 'code-server.cmd'),
+      'code-server.cmd'
+    ]
+  : [
+      'code-server',
+      join(homedir(), '.local', 'bin', 'code-server'),
+      '/usr/bin/code-server',
+      '/usr/local/bin/code-server'
+    ]
 
 const findCodeServerBin = (): string | null => {
+  // Check explicit candidate paths first.
   for (const c of CODE_SERVER_CANDIDATES) {
-    if (c.includes('/') && existsSync(c)) return c
+    if ((c.includes('/') || c.includes('\\')) && existsSync(c)) return c
   }
-  // PATH lookup via `which`-like
-  const PATH = (process.env.PATH || '').split(':')
-  for (const dir of PATH) {
-    const candidate = join(dir, 'code-server')
+  // PATH lookup — use platform-correct separator.
+  const paths = (process.env.PATH || '').split(PATH_SEP)
+  const exe = IS_WIN ? 'code-server.cmd' : 'code-server'
+  for (const dir of paths) {
+    const candidate = join(dir, exe)
     if (existsSync(candidate)) return candidate
   }
   return null
