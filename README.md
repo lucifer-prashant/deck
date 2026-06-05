@@ -75,4 +75,4 @@ Daily-driveable. Solid for everyday use. Known gaps tracked in code comments.
 
 ## License
 
-MIT
+Copyright (C) 2026 Prashant (lucifer-prashant). Licensed under the [MIT License](LICENSE).
