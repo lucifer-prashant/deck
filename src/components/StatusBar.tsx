@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { useWorkspaceStore } from '../store/workspaceStore'
 import { executeWorkspaceCommand } from '../workspaceCommands'
 import PresetsMenu from './PresetsMenu'
+import BookmarksMenu from './BookmarksMenu'
 import './StatusBar.css'
 
 const StatusBar: React.FC = () => {
@@ -21,6 +22,7 @@ const StatusBar: React.FC = () => {
   const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null)
 
   const [presetsMenu, setPresetsMenu] = useState<{ x: number; y: number } | null>(null)
+  const [bookmarksMenu, setBookmarksMenu] = useState<{ x: number; y: number } | null>(null)
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -84,6 +86,16 @@ const StatusBar: React.FC = () => {
         <span className="status-item summary">{summary}</span>
         <span className="status-sep" />
         <div className="status-bookmarks" title="Viewport Bookmarks (Alt+1-9 to jump, Ctrl+Alt+1-9 to set)">
+          <button
+            className="bookmarks-btn"
+            onClick={(e) => {
+              const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+              setBookmarksMenu({ x: r.left, y: r.top })
+            }}
+            title="Manage viewport bookmarks"
+          >
+            ⚙
+          </button>
           <span className="bookmarks-label">Bookmarks:</span>
           {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => {
             const isSet = !!(viewportBookmarks && viewportBookmarks[num])
@@ -131,6 +143,7 @@ const StatusBar: React.FC = () => {
       </div>
 
       {presetsMenu && <PresetsMenu anchor={presetsMenu} onClose={() => setPresetsMenu(null)} />}
+      {bookmarksMenu && <BookmarksMenu anchor={bookmarksMenu} onClose={() => setBookmarksMenu(null)} />}
     </div>
   )
 }

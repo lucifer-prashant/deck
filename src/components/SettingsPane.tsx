@@ -138,6 +138,10 @@ const SettingsPane: React.FC = () => {
 	const prefs = useWorkspaceStore((s) => s.prefs)
 	const updatePrefs = useWorkspaceStore((s) => s.updatePrefs)
 	const keybindings = useWorkspaceStore((s) => s.keybindings)
+	const updateAvailable = useWorkspaceStore((s) => s.updateAvailable)
+	const updateProgress = useWorkspaceStore((s) => s.updateProgress)
+	const updateStatus = useWorkspaceStore((s) => s.updateStatus)
+	const startUpdate = useWorkspaceStore((s) => s.startUpdate)
 	const [active, setActive] = useState<Section>("appearance")
 	const [version, setVersion] = useState("")
 	const [recordingId, setRecordingId] = useState<string | null>(null)
@@ -1326,7 +1330,34 @@ const SettingsPane: React.FC = () => {
 								<div style={{ fontSize: 18, fontWeight: 600, marginBottom: 4 }}>
 									Deck
 								</div>
-								<div style={{ opacity: 0.6 }}>version {version || "…"}</div>
+								<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+									<span style={{ opacity: 0.6 }}>version {version || "…"}</span>
+									{!updateAvailable ? (
+										<span style={{ color: '#22c55e', fontSize: 11, fontWeight: 600 }}>(latest)</span>
+									) : (
+										<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+											<button
+												onClick={startUpdate}
+												disabled={!!updateStatus && !updateStatus.includes('Failed')}
+												style={{
+													background: 'rgba(77, 171, 232, 0.18)',
+													border: '1px solid rgba(77, 171, 232, 0.45)',
+													color: '#4dabe8',
+													borderRadius: 4,
+													padding: '2px 8px',
+													fontSize: 11,
+													fontWeight: 600,
+													cursor: 'pointer',
+													fontFamily: 'inherit'
+												}}
+											>
+												Update Available (v{updateAvailable.version})
+											</button>
+											{updateStatus && <span style={{ opacity: 0.8, fontSize: 11 }}>{updateStatus}</span>}
+											{updateProgress !== null && <span style={{ opacity: 0.8, fontSize: 11 }}>{Math.round(updateProgress * 100)}%</span>}
+										</div>
+									)}
+								</div>
 								<div style={{ marginTop: 14, opacity: 0.7 }}>
 									Spatial infinite-canvas workspace for terminals, editors,
 									browsers, and notes.

@@ -6,6 +6,7 @@ import { spawn, ChildProcess } from 'child_process'
 import * as net from 'net'
 import * as pty from 'node-pty'
 import * as crypto from 'crypto'
+import * as http from 'http'
 
 // ─── Single Instance Lock ───────────────────────────────────────────────────
 const gotTheLock = app.requestSingleInstanceLock()
@@ -401,7 +402,7 @@ app.whenReady().then(async () => {
   // causing "Failed to delete the database: Database IO error" on next start and a
   // blank editor webview. Clearing service workers forces a fresh registration.
   try {
-    await session.fromPartition('persist:wts-code-server').clearStorageData({ storages: ['serviceworkers'] })
+    await session.fromPartition('persist:wts-code-server').clearStorageData({ storages: ['serviceworkers', 'cookies'] })
   } catch { /* non-fatal */ }
   protocol.handle('deck-asset', async (req) => {
     const filename = req.url.replace('deck-asset://', '')
@@ -1216,13 +1217,61 @@ const startCodeServer = async (): Promise<{ ok: boolean; port?: number; url?: st
 
       // Inject the authentication cookie into the partition's session so the webview bypasses the password screen
       const csSession = session.fromPartition('persist:wts-code-server')
-      await csSession.cookies.set({
-        url: `http://127.0.0.1:${port}`,
-        name: 'key',
-        value: password,
-        domain: '127.0.0.1',
-        path: '/'
-      })
+      try {
+        const allCookies = await csSession.cookies.get({})
+        for (const c of allCookies) {
+          const url = `${c.secure ? 'https' : 'http'}://${c.domain.startsWith('.') ? c.domain.slice(1) : c.domain}${c.path}`
+          await csSession.cookies.remove(url, c.name)
+        }
+      } catch { /* ignore */ }
+
+      // Programmatically login to retrieve the official session cookie
+      let sessionToken = ''
+      try {
+        sessionToken = await new Promise<string>((resolve, reject) => {
+          const postData = `password=${encodeURIComponent(password)}`
+          const req = http.request({
+            host: '127.0.0.1',
+            port: port,
+            path: '/login',
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/x-www-form-urlencoded',
+              'Content-Length': Buffer.byteLength(postData)
+            }
+          }, res => {
+            const setCookie = res.headers['set-cookie']
+            if (setCookie && setCookie.length > 0) {
+              const match = setCookie[0].match(/^code-server-session=([^;]+)/)
+              if (match) {
+                resolve(decodeURIComponent(match[1]))
+                return
+              }
+            }
+            reject(new Error('No code-server-session cookie in login response'))
+          })
+          req.on('error', err => reject(err))
+          req.write(postData)
+          req.end()
+        })
+      } catch (cookieErr) {
+        console.error('[code-server] Programmatic login failed:', cookieErr)
+      }
+
+      if (sessionToken) {
+        await csSession.cookies.set({
+          url: `http://127.0.0.1:${port}`,
+          name: 'code-server-session',
+          value: sessionToken,
+          path: '/'
+        })
+        await csSession.cookies.set({
+          url: `http://localhost:${port}`,
+          name: 'code-server-session',
+          value: sessionToken,
+          path: '/'
+        })
+      }
 
       codeServerPort = port
       return { ok: true, port, url: `http://127.0.0.1:${port}` }

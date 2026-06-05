@@ -25,7 +25,9 @@ const SHORTCUTS: Array<{ section: string; items: Array<[string, string]> }> = [
       ['Zoom', 'Ctrl+Scroll · Pinch · Ctrl+= / Ctrl+-'],
       ['Reset zoom', 'Ctrl+0'],
       ['Fit all', 'Fit chip · command palette'],
-      ['Selection box', 'Shift+drag empty space']
+      ['Selection box', 'Shift+drag empty space'],
+      ['Save viewport bookmark', 'Ctrl+Alt+1 – 9'],
+      ['Load viewport bookmark', 'Alt+1 – 9']
     ]
   },
   {

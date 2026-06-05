@@ -78,9 +78,14 @@ function MainAppShell() {
     prefs,
   } = useWorkspaceStore()
 
-  const [updateAvailable, setUpdateAvailable] = React.useState<{ version: string; url: string; filename: string } | null>(null)
-  const [updateProgress, setUpdateProgress] = React.useState<number | null>(null)
-  const [updateStatus, setUpdateStatus] = React.useState<string>('')
+  const {
+    updateAvailable,
+    updateProgress,
+    updateStatus,
+    setUpdateAvailable,
+    setUpdateProgress,
+    startUpdate
+  } = useWorkspaceStore()
   const [dismissedUpdate, setDismissedUpdate] = React.useState(false)
 
   // Check for updates on mount
@@ -118,7 +123,7 @@ function MainAppShell() {
       }
     }
     checkForUpdates()
-  }, [])
+  }, [setUpdateAvailable])
 
   // Listen for update download progress
   useEffect(() => {
@@ -127,30 +132,7 @@ function MainAppShell() {
       setUpdateProgress(percent)
     })
     return () => unsub()
-  }, [])
-
-  const startUpdate = async () => {
-    if (!updateAvailable || !window.electronAPI) return
-    setUpdateStatus('Downloading...')
-    setUpdateProgress(0)
-    try {
-      const res = await window.electronAPI.triggerUpdate(updateAvailable.url, updateAvailable.filename)
-      if (!res.ok) {
-        setUpdateStatus(`Failed: ${res.error}`)
-        setUpdateProgress(null)
-      } else {
-        if (res.downloadedTo) {
-          setUpdateStatus(`Downloaded! Open the file in your Downloads folder to install.`)
-          setUpdateProgress(null)
-        } else {
-          setUpdateStatus('Restarting to install update...')
-        }
-      }
-    } catch (err) {
-      setUpdateStatus('Error occurred during update.')
-      setUpdateProgress(null)
-    }
-  }
+  }, [setUpdateProgress])
 
   useEffect(() => { initialize() }, [initialize])
 

@@ -337,6 +337,9 @@ export interface WorkspaceState {
   presetGraveyards: PresetGraveyards
   canvasPresets: Record<string, CanvasPreset>
   viewportBookmarks: Record<number, Viewport>
+  updateAvailable: { version: string; url: string; filename: string } | null
+  updateProgress: number | null
+  updateStatus: string
   // Per-section pin: when set, that section ignores active-panel changes and stays on its pinned target.
   sidebarPin: { explorer?: string; git?: string }
   hiddenSidebarSections: SidebarSection[]
@@ -463,6 +466,11 @@ export interface WorkspaceState {
   renameCanvasPreset: (id: string, name: string) => void
   saveViewportBookmark: (num: number) => void
   loadViewportBookmark: (num: number) => void
+  deleteViewportBookmark: (num: number) => void
+  setUpdateAvailable: (up: { version: string; url: string; filename: string } | null) => void
+  setUpdateProgress: (progress: number | null) => void
+  setUpdateStatus: (status: string) => void
+  startUpdate: () => Promise<void>
   findOrCreateScratchpad: () => void
   loadKeybindingsFromFile: () => Promise<void>
   updateKeybinding: (command: string, keyCombo: string) => Promise<void>
@@ -617,6 +625,9 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       presetGraveyards: {},
       canvasPresets: {},
       viewportBookmarks: {},
+      updateAvailable: null,
+      updateProgress: null,
+      updateStatus: '',
       annotateMode: false,
       annotateTool: 'freehand',
       annotationsVisible: true,
@@ -1785,6 +1796,38 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         if (bookmark) {
           window.dispatchEvent(new CustomEvent('wts-smooth-viewport'))
           set({ viewport: bookmark })
+        }
+      },
+
+      deleteViewportBookmark: (num) => {
+        set((s) => {
+          const next = { ...(s.viewportBookmarks || {}) }
+          delete next[num]
+          return { viewportBookmarks: next }
+        })
+      },
+
+      setUpdateAvailable: (up) => set({ updateAvailable: up }),
+      setUpdateProgress: (progress) => set({ updateProgress: progress }),
+      setUpdateStatus: (status) => set({ updateStatus: status }),
+
+      startUpdate: async () => {
+        const state = get()
+        if (!state.updateAvailable || !window.electronAPI) return
+        set({ updateStatus: 'Downloading...', updateProgress: 0 })
+        try {
+          const res = await window.electronAPI.triggerUpdate(state.updateAvailable.url, state.updateAvailable.filename)
+          if (!res.ok) {
+            set({ updateStatus: `Failed: ${res.error}`, updateProgress: null })
+          } else {
+            if (res.downloadedTo) {
+              set({ updateStatus: 'Downloaded! Open the file in your Downloads folder to install.', updateProgress: null })
+            } else {
+              set({ updateStatus: 'Restarting to install update...' })
+            }
+          }
+        } catch (err) {
+          set({ updateStatus: 'Error occurred during update.', updateProgress: null })
         }
       },
 
