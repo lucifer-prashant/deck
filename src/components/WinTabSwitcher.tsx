@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo } from 'react'
+import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react'
 import { useWorkspaceStore, type Panel } from '../store/workspaceStore'
 import { executeWorkspaceCommand } from '../workspaceCommands'
 import './WinTabSwitcher.css'
@@ -34,6 +34,8 @@ const CARDS_PER_ROW = 4
 
 const WinTabSwitcher: React.FC = () => {
   const { winTabOpen, winTabSelectedPanelId, winTabSessionPanels, panels, activeTabId } = useWorkspaceStore()
+  const [mouseActive, setMouseActive] = useState(false)
+  const initialMousePos = useRef<{ x: number; y: number } | null>(null)
   const closeWinTabSwitcher = useWorkspaceStore(s => s.closeWinTabSwitcher)
   const cycleWinTabSelection = useWorkspaceStore(s => s.cycleWinTabSelection)
   const selectWinTabPanel = useWorkspaceStore(s => s.selectWinTabPanel)
@@ -61,18 +63,35 @@ const WinTabSwitcher: React.FC = () => {
     : null
 
   // Commit on release.
-  const commit = useCallback(() => {
-    if (winTabSelectedPanelId && panels[winTabSelectedPanelId]) {
-      selectPanel(winTabSelectedPanelId)
+  const commit = useCallback((targetId?: string | null) => {
+    const id = targetId || winTabSelectedPanelId
+    if (id && panels[id]) {
+      selectPanel(id)
       useWorkspaceStore.getState().enterFocusMode()
       executeWorkspaceCommand('focus-selected')
     }
     closeWinTabSwitcher(true)
   }, [winTabSelectedPanelId, panels, selectPanel, closeWinTabSwitcher])
 
-  // Keyboard while open.
+  // Keyboard & Mouse movement while open.
   useEffect(() => {
-    if (!winTabOpen) return
+    if (!winTabOpen) {
+      setMouseActive(false)
+      initialMousePos.current = null
+      return
+    }
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (initialMousePos.current === null) {
+        initialMousePos.current = { x: e.clientX, y: e.clientY }
+        return
+      }
+      const dx = e.clientX - initialMousePos.current.x
+      const dy = e.clientY - initialMousePos.current.y
+      if (Math.abs(dx) > 10 || Math.abs(dy) > 10) {
+        setMouseActive(true)
+      }
+    }
 
     const handler = (e: KeyboardEvent) => {
       const trap = () => { e.preventDefault(); e.stopImmediatePropagation() }
@@ -89,30 +108,36 @@ const WinTabSwitcher: React.FC = () => {
         cycleWinTabSelection(e.shiftKey ? -1 : 1)
         return
       }
-      // 1-8 → direct select.
-      if (/^[1-8]$/.test(e.key)) {
+      // Enter → commit.
+      if (e.key === 'Enter') {
         trap()
-        const idx = parseInt(e.key, 10) - 1
-        if (idx < cards.length) selectWinTabPanel(idx)
+        commit()
         return
       }
     }
 
     // Meta keyup → commit.
     const onMetaUp = (e: KeyboardEvent) => {
-      if (e.key === 'Meta' || e.key === 'Super') {
+      if (e.key === 'Meta' || e.key === 'Super' || e.key === 'OS') {
         e.preventDefault()
-        commit()
+        // If the user has moved the mouse, they are trying to click.
+        // We do NOT commit on release so that they can release the Super key
+        // and click the card normally without the window manager intercepting it.
+        if (!mouseActive) {
+          commit()
+        }
       }
     }
 
     window.addEventListener('keydown', handler, true)
     window.addEventListener('keyup', onMetaUp, true)
+    window.addEventListener('mousemove', handleMouseMove, true)
     return () => {
       window.removeEventListener('keydown', handler, true)
       window.removeEventListener('keyup', onMetaUp, true)
+      window.removeEventListener('mousemove', handleMouseMove, true)
     }
-  }, [winTabOpen, winTabSelectedPanelId, cards, closeWinTabSwitcher, cycleWinTabSelection, selectWinTabPanel, selectPanel, commit])
+  }, [winTabOpen, winTabSelectedPanelId, cards, closeWinTabSwitcher, cycleWinTabSelection, selectPanel, commit, mouseActive])
 
   if (!winTabOpen || cards.length === 0) return null
 
@@ -136,7 +161,12 @@ const WinTabSwitcher: React.FC = () => {
                 <div
                   key={card.panel.id}
                   className={`wintab-card${isSelected ? ' selected' : ''}${isCurrent ? ' current' : ''}`}
-                  onClick={() => selectWinTabPanel(globalIdx)}
+                  onMouseEnter={() => selectWinTabPanel(globalIdx)}
+                  onMouseDown={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    commit(card.panel.id)
+                  }}
                 >
                   <div className="wintab-header">
                     <span className="wintab-icon">{card.meta.icon}</span>

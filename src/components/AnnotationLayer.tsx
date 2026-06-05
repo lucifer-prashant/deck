@@ -13,6 +13,70 @@ const STICKY_COLORS = [
 	{ label: "Gray", value: "rgba(220, 222, 227, 0.92)" },
 ]
 
+// Annotation types rendered on the <canvas> element (not DOM elements).
+const DRAWING_TYPES = new Set(["freehand", "arrow", "rectangle", "highlight", "relationship"])
+
+function parseLineFormatting(text: string): React.ReactNode {
+	const regex = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*)/g
+	const tokens = text.split(regex)
+	return tokens.map((token, i) => {
+		if (token.startsWith('`') && token.endsWith('`')) {
+			return <code key={i} style={{ background: 'rgba(0,0,0,0.15)', padding: '2px 4px', borderRadius: 3, fontFamily: 'monospace', fontSize: '0.85em' }}>{token.slice(1, -1)}</code>
+		}
+		if (token.startsWith('**') && token.endsWith('**')) {
+			return <strong key={i} style={{ fontWeight: 'bold' }}>{token.slice(2, -2)}</strong>
+		}
+		if (token.startsWith('*') && token.endsWith('*')) {
+			return <em key={i} style={{ fontStyle: 'italic' }}>{token.slice(1, -1)}</em>
+		}
+		return token
+	})
+}
+
+function formatMarkdown(text: string): React.ReactNode[] {
+	if (!text) return []
+	const lines = text.split('\n')
+	return lines.map((line, index) => {
+		if (line.startsWith('- [ ] ') || line.startsWith('* [ ] ')) {
+			return (
+				<div key={index} style={{ display: 'flex', alignItems: 'center', gap: 6, margin: '2px 0' }}>
+					<input type="checkbox" checked={false} readOnly style={{ pointerEvents: 'none' }} />
+					<span>{parseLineFormatting(line.substring(6))}</span>
+				</div>
+			)
+		}
+		if (line.startsWith('- [x] ') || line.startsWith('* [x] ')) {
+			return (
+				<div key={index} style={{ display: 'flex', alignItems: 'center', gap: 6, margin: '2px 0' }}>
+					<input type="checkbox" checked={true} readOnly style={{ pointerEvents: 'none' }} />
+					<span style={{ textDecoration: 'line-through', opacity: 0.6 }}>{parseLineFormatting(line.substring(6))}</span>
+				</div>
+			)
+		}
+		if (line.startsWith('# ')) {
+			return <h1 key={index} style={{ fontSize: '1.35em', margin: '8px 0 4px', fontWeight: 'bold', borderBottom: '1px solid rgba(255,255,255,0.07)', paddingBottom: 2 }}>{parseLineFormatting(line.substring(2))}</h1>
+		}
+		if (line.startsWith('## ')) {
+			return <h2 key={index} style={{ fontSize: '1.2em', margin: '7px 0 3px', fontWeight: 'bold' }}>{parseLineFormatting(line.substring(3))}</h2>
+		}
+		if (line.startsWith('### ')) {
+			return <h3 key={index} style={{ fontSize: '1.1em', margin: '6px 0 2px', fontWeight: 'bold' }}>{parseLineFormatting(line.substring(4))}</h3>
+		}
+		if (line.startsWith('- ') || line.startsWith('* ')) {
+			return (
+				<li key={index} style={{ marginLeft: 14, listStyleType: 'disc', margin: '2px 0' }}>
+					{parseLineFormatting(line.substring(2))}
+				</li>
+			)
+		}
+		return (
+			<div key={index} style={{ minHeight: '1.1em', margin: '2px 0' }}>
+				{parseLineFormatting(line)}
+			</div>
+		)
+	})
+}
+
 const AnnotationLayer: React.FC = () => {
 	const activeTabId = useWorkspaceStore((s) => s.activeTabId)
 	const annotations = useWorkspaceStore(
@@ -23,14 +87,7 @@ const AnnotationLayer: React.FC = () => {
 	)
 	const panels = useWorkspaceStore((s) => s.panels)
 
-	const drawingTypes = new Set([
-		"freehand",
-		"arrow",
-		"rectangle",
-		"highlight",
-		"relationship",
-	])
-	const domAnnotations = annotations.filter((a) => !drawingTypes.has(a.type))
+	const domAnnotations = annotations.filter((a) => !DRAWING_TYPES.has(a.type))
 	const relationships = annotations.filter((a) => a.type === "relationship")
 
 	return (
@@ -553,7 +610,7 @@ const AnnotationNode: React.FC<{ annotation: Annotation }> = ({
 				<div className="anno-title" style={{ left: a.x, top: a.y - 14 }}>{a.title}</div>
 			)}
 			<div
-				className={`anno-label ${selectedAnnotationIds.includes(a.id) ? 'anno-selected' : ''} ${jumpActive ? 'jump-highlight' : ''}`}
+				className={`anno-label ${editing ? 'editing' : ''} ${selectedAnnotationIds.includes(a.id) ? 'anno-selected' : ''} ${jumpActive ? 'jump-highlight' : ''}`}
 				ref={labelRef}
 				style={{
 					left: a.x,
@@ -693,7 +750,9 @@ const AnnotationNode: React.FC<{ annotation: Annotation }> = ({
 					spellCheck={false}
 				/>
 			) : (
-				<div className="anno-sticky-text">{a.text || "sticky note"}</div>
+				<div className="anno-sticky-text" style={{ whiteSpace: 'normal', overflowY: 'auto' }}>
+					{a.text ? formatMarkdown(a.text) : <span style={{ opacity: 0.45, fontStyle: 'italic' }}>Double-click to write note (Markdown supported)</span>}
+				</div>
 			)}
 		</div>
 		{pickerEl}

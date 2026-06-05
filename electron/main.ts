@@ -94,7 +94,9 @@ function buildMenu() {
         { label: 'Toggle Minimize',                                 click: () => send('toggle-minimize') },
         { label: 'Pin to Front',                                    click: () => send('toggle-pin-front') },
         { label: 'Bring to Front',                                  click: () => send('bring-front') },
-        { label: 'Send to Back',                                    click: () => send('send-back') }
+        { label: 'Send to Back',                                    click: () => send('send-back') },
+        { type: 'separator' },
+        { label: 'Preferences...',                                  accelerator: 'CmdOrCtrl+,', click: () => send('toggle-settings') }
       ]
     },
     {

@@ -1,7 +1,7 @@
 import React, { useRef, useState, useCallback, useEffect } from 'react'
 import { flushSync } from 'react-dom'
-import { Panel as PanelType } from '../store/workspaceStore'
-import { useWorkspaceStore } from '../store/workspaceStore'
+import { Panel as PanelType, useWorkspaceStore } from '../store/workspaceStore'
+import { executeWorkspaceCommand } from '../workspaceCommands'
 import { confirmPanelsDeletion } from '../panelDeletion'
 import PanelContextMenu from './PanelContextMenu'
 import BrowserPanel from './BrowserPanel'
@@ -165,6 +165,7 @@ const Panel: React.FC<PanelProps> = ({ panel, isSelected, offscreen, annotateMod
   const pushHistory = useWorkspaceStore(s => s.pushHistory)
   const setDragGuides = useWorkspaceStore(s => s.setDragGuides)
   const stackDropTargetId = useWorkspaceStore(s => s.stackDropTargetId)
+  const prefs = useWorkspaceStore(s => s.prefs)
   // Track which other panel's header is under the cursor during a drag — used
   // for drag-onto-header → stack merge. Updated in applyMove; consumed in mouseup.
   const stackHitRef = useRef<string | null>(null)
@@ -807,7 +808,10 @@ const Panel: React.FC<PanelProps> = ({ panel, isSelected, offscreen, annotateMod
           height: panel.minimized || regionCollapsed ? 34 : panel.height,
           zIndex: panel.pinFront ? 9000 : panel.pinBack ? 0 : panel.zIndex,
           borderColor,
-          ['--accent' as string]: accent || ''
+          ['--accent' as string]: accent || '',
+          background: `color-mix(in srgb, var(--panel-bg, #2d2d30) ${(prefs.panelGlassOpacity ?? 0.85) * 100}%, transparent)`,
+          backdropFilter: `blur(${prefs.panelGlassBlur ?? 12}px)`,
+          WebkitBackdropFilter: `blur(${prefs.panelGlassBlur ?? 12}px)`
         }}
         onMouseDown={handleMouseDown}
         onContextMenu={handleContextMenu}
@@ -816,7 +820,18 @@ const Panel: React.FC<PanelProps> = ({ panel, isSelected, offscreen, annotateMod
         tabIndex={-1}
       >
         {accent && <div className="panel-accent-bar" style={{ background: accent }} />}
-        <div className="panel-header" onDoubleClick={(e) => { e.stopPropagation(); beginRename() }}>
+        <div className="panel-header" onDoubleClick={(e) => {
+          e.stopPropagation()
+          const action = prefs.panelHeaderDoubleClick || 'rename'
+          if (action === 'rename') {
+            beginRename()
+          } else if (action === 'minimize') {
+            updatePanel(panel.id, { minimized: !panel.minimized })
+          } else if (action === 'focus') {
+            useWorkspaceStore.getState().selectPanel(panel.id, false)
+            executeWorkspaceCommand('focus-selected')
+          }
+        }}>
           <span className="panel-type-icon" aria-hidden>{TYPE_ICON[panel.type]}</span>
           {(panel.type === 'terminal' || panel.type === 'browser' || panel.type === 'editor') && panel.healthState && (
             <span

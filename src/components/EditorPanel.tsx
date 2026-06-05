@@ -285,8 +285,11 @@ const MonacoFallback: React.FC<{ panel: PanelType }> = ({ panel }) => {
   const [filePath, setFilePath] = useState<string | undefined>(settings.filePath)
   const [language, setLanguage] = useState<string>(settings.language || detectLang(settings.filePath))
   const [dirty, setDirty] = useState(false)
-  const [fontSize] = useState<number>(settings.fontSize || 14)
-  const [wordWrap, setWordWrap] = useState<'on' | 'off'>(settings.wordWrap || 'off')
+  const prefs = useWorkspaceStore(s => s.prefs)
+  const defaultFontSize = settings.fontSize || prefs.editorFontSize || 14
+  const defaultWordWrap = settings.wordWrap || prefs.editorWordWrap || 'off'
+  const [fontSize] = useState<number>(defaultFontSize)
+  const [wordWrap, setWordWrap] = useState<'on' | 'off'>(defaultWordWrap)
   const [statusMsg, setStatusMsg] = useState<string>('')
   const flashTimerRef = useRef<number>(0)
   const editorRef = useRef<monacoNS.editor.IStandaloneCodeEditor | null>(null)
@@ -356,7 +359,7 @@ const MonacoFallback: React.FC<{ panel: PanelType }> = ({ panel }) => {
   const handleMount: OnMount = (editor, monaco: Monaco) => {
     editorRef.current = editor
     editor.updateOptions({
-      fontFamily: "'JetBrainsMono Nerd Font', 'JetBrains Mono', 'Fira Code', 'SF Mono', Menlo, monospace",
+      fontFamily: prefs.editorFontFamily || "'JetBrainsMono Nerd Font', 'JetBrains Mono', 'Fira Code', 'SF Mono', Menlo, monospace",
       fontLigatures: true, fontSize, lineNumbers: 'on',
       minimap: { enabled: true, renderCharacters: false },
       scrollBeyondLastLine: false, smoothScrolling: true,

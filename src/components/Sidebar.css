@@ -244,14 +244,14 @@
 .tree-row {
   display: flex;
   align-items: center;
-  gap: 7px;
-  padding: 4px 12px 4px 10px;
+  gap: var(--density-gap);
+  padding: var(--density-padding-y) calc(var(--density-padding-x) + 2px) var(--density-padding-y) var(--density-padding-x);
   cursor: pointer;
   user-select: none;
   white-space: nowrap;
-  font-size: 12.5px;
+  font-size: var(--density-font-size);
   line-height: 1.45;
-  margin: 0 6px;
+  margin: 0 var(--density-gap);
   border-radius: 5px;
   position: relative;
   transition: background 0.08s ease, padding 0.12s ease;

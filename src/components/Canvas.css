@@ -2,12 +2,54 @@
   position: relative;
   width: 100vw;
   height: 100vh;
-  background: #1e1e1e;
+  background-color: var(--canvas-bg-color, #1e1e1e);
+  overflow: hidden;
+}
+
+/* Default grid background */
+.canvas-container.bg-grid {
+  background-color: var(--canvas-bg-color, #1e1e1e);
   background-image:
     linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
     linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
-  background-size: 20px 20px;
-  overflow: hidden;
+  background-size: var(--canvas-grid-size, 20px) var(--canvas-grid-size, 20px);
+}
+
+/* Dot grid background */
+.canvas-container.bg-dot {
+  background-color: var(--canvas-bg-color, #1e1e1e);
+  background-image: radial-gradient(rgba(255, 255, 255, 0.08) 1.2px, transparent 1.2px);
+  background-size: var(--canvas-grid-size, 20px) var(--canvas-grid-size, 20px);
+}
+
+/* Blueprint background — minor grid + major grid (5× minor) */
+.canvas-container.bg-blueprint {
+  background-color: var(--canvas-bg-color, #182848);
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.08) 1px, transparent 1px),
+    linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  background-size:
+    var(--canvas-grid-major, 100px) var(--canvas-grid-major, 100px),
+    var(--canvas-grid-major, 100px) var(--canvas-grid-major, 100px),
+    var(--canvas-grid-size,  20px)  var(--canvas-grid-size,  20px),
+    var(--canvas-grid-size,  20px)  var(--canvas-grid-size,  20px);
+}
+
+/* Cyberpunk Neon background */
+.canvas-container.bg-neon {
+  background-color: var(--canvas-bg-color, #0d0e15);
+  background-image:
+    linear-gradient(rgba(255, 0, 128, 0.06) 2px, transparent 2px),
+    linear-gradient(90deg, rgba(0, 240, 255, 0.06) 2px, transparent 2px);
+  background-size: var(--canvas-grid-size, 40px) var(--canvas-grid-size, 40px);
+}
+
+/* Solid background (no grid) */
+.canvas-container.bg-none {
+  background-color: var(--canvas-bg-color, #1e1e1e);
+  background-image: none;
 }
 
 .canvas-content {

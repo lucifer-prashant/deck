@@ -16,7 +16,34 @@ import { useWorkspaceStore } from './store/workspaceStore'
 import { executeWorkspaceCommand, WorkspaceCommand, fitItemsToViewport } from './workspaceCommands'
 import './App.css'
 
+declare global {
+  interface Window {
+    __updateDynamicTheme?: (color: string) => void;
+  }
+}
+
 const JUMP_LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+
+const MODIFIER_KEYS = new Set(['control', 'shift', 'alt', 'meta', 'os', 'super'])
+
+export function serializeKeyEvent(e: KeyboardEvent): string {
+  const key = e.key.toLowerCase()
+  if (MODIFIER_KEYS.has(key)) return ''
+
+  const parts: string[] = []
+  if (e.ctrlKey) parts.push('ctrl')
+  if (e.altKey) parts.push('alt')
+  if (e.shiftKey) {
+    const isLetter = /^[a-z]$/.test(key)
+    const isSpecial = key.length > 1
+    if (isLetter || isSpecial) {
+      parts.push('shift')
+    }
+  }
+  if (e.metaKey) parts.push('meta')
+  parts.push(key)
+  return parts.join('+')
+}
 
 function App() {
   // Detect popout mode via URL query: ?popout=<panelId>
@@ -32,28 +59,23 @@ function MainAppShell() {
     commandPaletteOpen,
     toggleCommandPalette,
     togglePanelFinder,
-    toggleOutliner,
     toggleHelp,
-    cycleTheme,
     undo,
     redo,
     undoAnnotation,
     redoAnnotation,
-    theme,
     panels,
     tabs,
     activeTabId,
     toggleMinimap,
     setJumpMode,
     selectPanel,
-    setViewport,
     chromeVisible,
     toggleChrome,
     toggleAnnotateMode,
     togglePanelSwitcher,
     openWinTabSwitcher,
-    closeWinTabSwitcher,
-    cycleWinTabSelection
+    prefs,
   } = useWorkspaceStore()
 
   useEffect(() => { initialize() }, [initialize])
@@ -81,17 +103,119 @@ function MainAppShell() {
   }, [])
 
   useEffect(() => {
-    // 'system' = follow OS preference. Watch the media query and remap to
-    // dark/light dynamically so user can switch OS theme and we follow.
-    if (theme === 'system') {
-      const mq = window.matchMedia('(prefers-color-scheme: light)')
-      const apply = () => document.documentElement.setAttribute('data-theme', mq.matches ? 'light' : 'dark')
-      apply()
-      mq.addEventListener('change', apply)
-      return () => mq.removeEventListener('change', apply)
+    const gridFallbacks: Record<string, string> = {
+      none: '#1f2024',
+      grid: '#1f2024',
+      dot: '#1f2024',
+      blueprint: '#182848',
+      neon: '#0d0e15'
     }
-    document.documentElement.setAttribute('data-theme', theme)
-  }, [theme])
+
+    const updateDynamicTheme = (baseColor: string) => {
+      const color = baseColor || gridFallbacks[useWorkspaceStore.getState().prefs.canvasGridStyle ?? 'none'] || '#1f2024'
+      
+      const cleanHex = color.replace('#', '')
+      let r = 31, g = 32, b = 36
+      if (cleanHex.length === 6) {
+        const num = parseInt(cleanHex, 16)
+        r = (num >> 16) & 255
+        g = (num >> 8) & 255
+        b = num & 255
+      } else if (cleanHex.length === 3) {
+        r = parseInt(cleanHex[0] + cleanHex[0], 16)
+        g = parseInt(cleanHex[1] + cleanHex[1], 16)
+        b = parseInt(cleanHex[2] + cleanHex[2], 16)
+      }
+
+      const hsp = Math.sqrt(0.299 * (r * r) + 0.587 * (g * g) + 0.114 * (b * b))
+      const isLight = hsp > 155
+
+      const root = document.documentElement
+      root.style.setProperty('--bg', color)
+
+      if (isLight) {
+        root.style.setProperty('--fg', '#1a1d22')
+        root.style.setProperty('--fg-muted', '#5b6470')
+        root.style.setProperty('--panel-bg', 'rgba(255, 255, 255, 0.75)')
+        root.style.setProperty('--panel-header-bg', 'rgba(238, 240, 243, 0.85)')
+        root.style.setProperty('--panel-border', 'rgba(0, 0, 0, 0.12)')
+        root.style.setProperty('--panel-title', '#1f2329')
+        root.style.setProperty('--chrome-bg', 'rgba(248, 249, 251, 0.92)')
+        root.style.setProperty('--chrome-border', 'rgba(0, 0, 0, 0.08)')
+        root.style.setProperty('--status-bg', 'rgba(238, 240, 243, 0.92)')
+        root.style.setProperty('--selection-color', '#2563eb')
+        root.style.setProperty('--menu-bg', 'rgba(255, 255, 255, 0.98)')
+        root.style.setProperty('--menu-fg', '#1a1d22')
+        root.style.setProperty('--menu-border', 'rgba(0, 0, 0, 0.1)')
+        root.style.setProperty('--menu-hover', 'rgba(37, 99, 235, 0.12)')
+        root.style.setProperty('--btn-text', '#ffffff')
+        root.style.setProperty('--error-fg', '#dc2626')
+        root.style.setProperty('--error-border', 'rgba(220, 38, 38, 0.35)')
+        root.style.setProperty('--modal-bg', 'rgba(255, 255, 255, 0.98)')
+        root.style.setProperty('--modal-border', 'rgba(0, 0, 0, 0.08)')
+        root.style.setProperty('--input-bg', '#ffffff')
+        root.setAttribute('data-theme', 'light')
+      } else {
+        root.style.setProperty('--fg', '#e6e8ec')
+        root.style.setProperty('--fg-muted', '#bfc4cb')
+        
+        const lighten = (c: number, amt: number) => Math.min(255, Math.floor(c + (255 - c) * amt))
+        const pr = lighten(r, 0.08)
+        const pg = lighten(g, 0.08)
+        const pb = lighten(b, 0.08)
+        root.style.setProperty('--panel-bg', `rgba(${pr}, ${pg}, ${pb}, 0.75)`)
+         
+        const phr = lighten(r, 0.14)
+        const phg = lighten(g, 0.14)
+        const phb = lighten(b, 0.14)
+        root.style.setProperty('--panel-header-bg', `rgba(${phr}, ${phg}, ${phb}, 0.85)`)
+        
+        const maxVal = Math.max(r, g, b)
+        const minVal = Math.min(r, g, b)
+        const chroma = maxVal - minVal
+        const isSaturated = chroma > 80
+
+        const panelBorderOpacity = isSaturated ? 0.32 : 0.2
+        const panelBorderLighten = isSaturated ? 0.28 : 0.2
+        root.style.setProperty('--panel-border', `rgba(${lighten(r, panelBorderLighten)}, ${lighten(g, panelBorderLighten)}, ${lighten(b, panelBorderLighten)}, ${panelBorderOpacity})`)
+        root.style.setProperty('--panel-title', '#d4d7dc')
+        
+        const cr = Math.max(0, r - 10)
+        const cg = Math.max(0, g - 10)
+        const cb = Math.max(0, b - 10)
+        root.style.setProperty('--chrome-bg', `rgba(${cr}, ${cg}, ${cb}, 0.92)`)
+        
+        const chromeBorderOpacity = isSaturated ? 0.38 : 0.16
+        const chromeBorderLighten = isSaturated ? 0.35 : 0.25
+        root.style.setProperty('--chrome-border', `rgba(${lighten(r, chromeBorderLighten)}, ${lighten(g, chromeBorderLighten)}, ${lighten(b, chromeBorderLighten)}, ${chromeBorderOpacity})`)
+        root.style.setProperty('--status-bg', `rgba(${Math.max(0, r - 15)}, ${Math.max(0, g - 15)}, ${Math.max(0, b - 15)}, 0.92)`)
+        root.style.setProperty('--selection-color', '#4dabe8')
+        root.style.setProperty('--menu-bg', `rgba(${cr}, ${cg}, ${cb}, 0.98)`)
+        root.style.setProperty('--menu-fg', '#e6e8ec')
+        root.style.setProperty('--menu-border', 'rgba(255, 255, 255, 0.12)')
+        root.style.setProperty('--menu-hover', 'rgba(77, 171, 232, 0.22)')
+        root.style.setProperty('--btn-text', '#000000')
+        root.style.setProperty('--error-fg', '#ff8585')
+        root.style.setProperty('--error-border', 'rgba(235, 94, 85, 0.3)')
+        
+        const mr = Math.floor(18 + r * 0.08)
+        const mg = Math.floor(18 + g * 0.08)
+        const mb = Math.floor(18 + b * 0.08)
+        root.style.setProperty('--modal-bg', `rgba(${mr}, ${mg}, ${mb}, 0.98)`)
+        root.style.setProperty('--modal-border', `rgba(${lighten(r, 0.25)}, ${lighten(g, 0.25)}, ${lighten(b, 0.25)}, 0.15)`)
+        root.style.setProperty('--input-bg', 'rgba(0, 0, 0, 0.28)')
+        root.setAttribute('data-theme', 'dark')
+      }
+    }
+
+    const baseColor = prefs.canvasBgColor || gridFallbacks[prefs.canvasGridStyle ?? 'none'] || '#1f2024'
+    updateDynamicTheme(baseColor)
+
+    window.__updateDynamicTheme = updateDynamicTheme
+    return () => {
+      delete window.__updateDynamicTheme
+    }
+  }, [prefs.canvasBgColor, prefs.canvasGridStyle])
 
   // Panel ring states are explicit store flags (not :focus-based, because webview/xterm
   // fight us for focus). headerActivePanelId → blue ring forced on. bodyActivePanelId
@@ -121,6 +245,19 @@ function MainAppShell() {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      const stateForOverlay = useWorkspaceStore.getState()
+      const isOverlayOpen =
+        stateForOverlay.settingsOpen ||
+        stateForOverlay.commandPaletteOpen ||
+        stateForOverlay.panelFinderOpen ||
+        stateForOverlay.helpOpen ||
+        stateForOverlay.globalSearchOpen ||
+        stateForOverlay.winTabOpen ||
+        stateForOverlay.panelSwitcherOpen
+      if (isOverlayOpen) {
+        return
+      }
+
       const target = e.target as HTMLElement | null
       const active = document.activeElement as HTMLElement | null
       const isTextInput =
@@ -245,6 +382,37 @@ function MainAppShell() {
         return
       }
 
+      // Zen Focus Toggles: Ctrl+\ and Ctrl+/
+      const isCtrlSlash = (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key === '/'
+      const isCtrlBackslash = (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key === '\\'
+      
+      if (isCtrlSlash || isCtrlBackslash) {
+        e.preventDefault()
+        e.stopPropagation()
+        e.stopImmediatePropagation()
+        useWorkspaceStore.getState().toggleBars()
+        return
+      }
+
+      // Viewport Bookmarks: Ctrl+Alt+[1-9] to Save, Alt+[1-9] to Load
+      const numMatch = e.key.match(/^[1-9]$/)
+      if (numMatch) {
+        const num = parseInt(e.key, 10)
+        if ((e.ctrlKey || e.metaKey) && e.altKey) {
+          e.preventDefault()
+          e.stopPropagation()
+          e.stopImmediatePropagation()
+          useWorkspaceStore.getState().saveViewportBookmark(num)
+          return
+        } else if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+          e.preventDefault()
+          e.stopPropagation()
+          e.stopImmediatePropagation()
+          useWorkspaceStore.getState().loadViewportBookmark(num)
+          return
+        }
+      }
+
       // Jump mode owns the keyboard while active.
       if (liveJump.active) {
         if (e.key === 'Escape') {
@@ -273,9 +441,10 @@ function MainAppShell() {
         return
       }
 
-      // Tab → enter jump mode (only when not typing, no modifier, items exist).
-      if (!isTextInput && e.key === 'Tab' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
-        const state = useWorkspaceStore.getState()
+      // Tab → enter jump mode (only when not typing, no modifier, items exist, and no switcher is open).
+      const state = useWorkspaceStore.getState()
+      if (!isTextInput && e.key === 'Tab' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey &&
+          !state.winTabOpen && !state.panelSwitcherOpen) {
         const panels = Object.values(state.panels).filter(p => p.type !== 'region')
           .sort((a, b) => a.y - b.y || a.x - b.x)
 
@@ -294,19 +463,7 @@ function MainAppShell() {
         }
       }
 
-      // Ctrl+Tab / Ctrl+Shift+Tab → MRU panel switcher.
-      if ((e.ctrlKey || e.metaKey) && e.key === 'Tab' && !e.metaKey) {
-        e.preventDefault()
-        togglePanelSwitcher()
-        return
-      }
 
-      // Meta+Tab → Win+Tab Alt+Tab-style switcher.
-      if (e.metaKey && e.key === 'Tab' && !e.ctrlKey) {
-        e.preventDefault()
-        openWinTabSwitcher()
-        return
-      }
 
       // Alt+Arrow → resize selected panel(s). Alt+Shift+Arrow → shrink instead of grow.
       // Block when a switcher is open.
@@ -473,84 +630,106 @@ function MainAppShell() {
         }
       }
 
-      // Help: ? or F1 (no modifier)
-      if (!isTextInput && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        if (e.key === '?' || e.key === 'F1') {
-          e.preventDefault()
-          toggleHelp()
-          return
-        }
-        if (e.key === 'F2') {
-          e.preventDefault()
-          const _sel = useWorkspaceStore.getState().selectedPanelIds
-          if (_sel.length === 1) {
-            useWorkspaceStore.getState().requestRename(_sel[0])
-          }
-          return
-        }
-        if (e.key === 'f' || e.key === 'F') {
-          if (useWorkspaceStore.getState().selectedPanelIds.length > 0) {
-            e.preventDefault()
-            const state = useWorkspaceStore.getState()
-            // Distraction-free: hide top bar + status bar + minimap on F focus.
-            state.enterFocusMode()
-            executeWorkspaceCommand('focus-selected')
-            return
-          }
-        }
-        if (e.key === 'm' || e.key === 'M') {
-          e.preventDefault()
-          toggleMinimap()
-          return
-        }
-        if (e.key === 'a' || e.key === 'A') {
-          e.preventDefault()
-          toggleAnnotateMode()
-          return
-        }
-      }
+      // Dynamic Keybinding Routing
+      const keyCombo = serializeKeyEvent(e)
+      if (keyCombo) {
+        const state = useWorkspaceStore.getState()
+        const commandId = Object.entries(state.keybindings).find(([, combo]) => combo === keyCombo)?.[0]
 
-      if (!(e.metaKey || e.ctrlKey) || e.altKey) return
+        if (commandId) {
+          const trap = () => { e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation() }
 
-      const k = e.key.toLowerCase()
-      if (k === 'p') {
-        e.preventDefault(); toggleCommandPalette()
-      } else if (k === ',') {
-        e.preventDefault()
-        useWorkspaceStore.getState().toggleSettings()
-      } else if (k === 'f') {
-        e.preventDefault(); togglePanelFinder()
-      } else if (k === 'b' && e.shiftKey) {
-        e.preventDefault()
-        const s = useWorkspaceStore.getState()
-        // Hide chrome + status bar when sidebar opens (cleaner workspace). Restore them
-        // when sidebar closes.
-        const willOpen = !s.sidebarOpen
-        s.toggleSidebar()
-        if (willOpen) s.setBarsVisible(false)
-        else s.setBarsVisible(true)
-      } else if (k === 'b' && !e.shiftKey) {
-        e.preventDefault(); executeWorkspaceCommand('new-browser')
-      } else if (k === 'z' && !e.shiftKey) {
-        e.preventDefault()
-        const s = useWorkspaceStore.getState()
-        if (s.annotateMode && s.annotationPast.length > 0) { s.undoAnnotation() } else { undo() }
-      } else if ((k === 'z' && e.shiftKey) || k === 'y') {
-        e.preventDefault()
-        const s = useWorkspaceStore.getState()
-        if (s.annotateMode && s.annotationFuture.length > 0) { s.redoAnnotation() } else { redo() }
-      } else if (k === 't' && e.shiftKey) {
-        e.preventDefault(); cycleTheme()
-      } else if (k === '\\') {
-        e.preventDefault(); useWorkspaceStore.getState().toggleBars()
-      } else if (k === 'l' && e.shiftKey) {
-        e.preventDefault(); useWorkspaceStore.getState().loadPreset('life')
-      } else if (k === 'k' && e.shiftKey) {
-        e.preventDefault(); useWorkspaceStore.getState().loadPreset('no-life')
-      } else if (k === 'a' && e.shiftKey) {
-        e.preventDefault(); executeWorkspaceCommand('arrange-selected')
-      } else if (k === ' ' && e.shiftKey) {
-        e.preventDefault(); useWorkspaceStore.getState().findOrCreateScratchpad()
+          switch (commandId) {
+            case 'toggle-help':
+              trap(); toggleHelp(); return
+            case 'rename-selected': {
+              trap()
+              const _sel = state.selectedPanelIds
+              if (_sel.length === 1) state.requestRename(_sel[0])
+              return
+            }
+            case 'focus-selected':
+              if (state.selectedPanelIds.length > 0) {
+                trap()
+                state.enterFocusMode()
+                executeWorkspaceCommand('focus-selected')
+              }
+              return
+            case 'toggle-minimap':
+              trap(); toggleMinimap(); return
+            case 'toggle-annotate-mode':
+              trap(); toggleAnnotateMode(); return
+            case 'toggle-command-palette':
+              trap(); toggleCommandPalette(); return
+            case 'toggle-settings':
+              trap(); state.toggleSettings(); return
+            case 'toggle-panel-finder':
+              trap(); togglePanelFinder(); return
+            case 'toggle-sidebar': {
+              trap()
+              const willOpen = !state.sidebarOpen
+              state.toggleSidebar()
+              if (willOpen) state.setBarsVisible(false)
+              else state.setBarsVisible(true)
+              return
+            }
+            case 'new-browser':
+              trap(); executeWorkspaceCommand('new-browser'); return
+            case 'undo':
+              trap()
+              if (state.annotateMode && state.annotationPast.length > 0) state.undoAnnotation()
+              else undo()
+              return
+            case 'redo':
+              trap()
+              if (state.annotateMode && state.annotationFuture.length > 0) state.redoAnnotation()
+              else redo()
+              return
+
+            case 'toggle-bars':
+              trap(); state.toggleBars(); return
+            case 'load-preset-life':
+              trap(); state.loadPreset('life'); return
+            case 'load-preset-nolife':
+              trap(); state.loadPreset('no-life'); return
+            case 'arrange-selected':
+              trap(); executeWorkspaceCommand('arrange-selected'); return
+            case 'find-scratchpad':
+              trap(); state.findOrCreateScratchpad(); return
+            case 'open-wintab-switcher':
+              if (!state.winTabOpen) {
+                trap()
+                openWinTabSwitcher()
+              }
+              return
+            case 'toggle-panel-switcher':
+              trap(); togglePanelSwitcher(); return
+            case 'new-terminal':
+              trap(); executeWorkspaceCommand('new-terminal'); return
+            case 'new-editor':
+              trap(); executeWorkspaceCommand('new-editor'); return
+            case 'new-region':
+              trap(); executeWorkspaceCommand('new-region'); return
+            case 'zoom-in':
+              trap(); executeWorkspaceCommand('zoom-in'); return
+            case 'zoom-out':
+              trap(); executeWorkspaceCommand('zoom-out'); return
+            case 'reset-viewport':
+              trap(); executeWorkspaceCommand('reset-viewport'); return
+            case 'fit-all':
+              trap(); executeWorkspaceCommand('fit-all'); return
+            case 'toggle-lock':
+              trap(); executeWorkspaceCommand('toggle-lock'); return
+            case 'toggle-minimize':
+              trap(); executeWorkspaceCommand('toggle-minimize'); return
+            case 'toggle-pin-front':
+              trap(); executeWorkspaceCommand('toggle-pin-front'); return
+            case 'bring-front':
+              trap(); executeWorkspaceCommand('bring-front'); return
+            case 'send-back':
+              trap(); executeWorkspaceCommand('send-back'); return
+          }
+        }
       }
     }
 
@@ -558,7 +737,7 @@ function MainAppShell() {
     window.addEventListener('keydown', handleKeyDown, true)
     return () => window.removeEventListener('keydown', handleKeyDown, true)
   // panels/selectedPanelIds/updatePanel/jumpMode omitted — handler reads live state via getState()
-  }, [toggleCommandPalette, togglePanelFinder, toggleOutliner, toggleHelp, cycleTheme, undo, redo, undoAnnotation, redoAnnotation, toggleMinimap, setJumpMode, selectPanel, setViewport, toggleChrome, toggleAnnotateMode, togglePanelSwitcher, openWinTabSwitcher, closeWinTabSwitcher, cycleWinTabSelection])
+  }, [toggleCommandPalette, togglePanelFinder, toggleHelp, undo, redo, undoAnnotation, redoAnnotation, toggleMinimap, setJumpMode, selectPanel, toggleChrome, toggleAnnotateMode, togglePanelSwitcher, openWinTabSwitcher, prefs.canvasBgColor, prefs.canvasGridStyle])
 
   useEffect(() => {
     const validCommands = new Set<WorkspaceCommand>([
@@ -575,6 +754,7 @@ function MainAppShell() {
     const removeListener = window.electronAPI?.onWorkspaceCommand?.((command) => {
       // toggle-help fires from the menu and must work even when focus is inside a panel.
       if (command === 'toggle-help') { executeWorkspaceCommand('toggle-help'); return }
+      if (command === 'toggle-settings') { useWorkspaceStore.getState().toggleSettings(); return }
       // Belt + suspenders: ignore IPC commands while typing OR while focus is in an embedded app.
       const active = document.activeElement as HTMLElement | null
       const isTextInput =

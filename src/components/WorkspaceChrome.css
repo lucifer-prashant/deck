@@ -15,18 +15,18 @@
 }
 
 .workspace-tabs-row {
-  min-height: 44px;
+  min-height: var(--density-chrome-height);
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 7px 8px;
+  gap: var(--density-gap);
+  padding: var(--density-chrome-padding);
   overflow: hidden;
 }
 
 .workspace-tabs {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--density-gap);
   overflow-x: auto;
   scrollbar-width: none;
   flex: 0 1 auto;
@@ -64,7 +64,7 @@
 }
 
 .workspace-tab {
-  height: 30px;
+  height: var(--density-tab-height);
   width: auto;
   min-width: 0;
   max-width: 280px;
@@ -75,10 +75,10 @@
   display: inline-flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding: 0 10px;
+  gap: var(--density-gap);
+  padding: var(--density-tab-padding);
   cursor: pointer;
-  font-size: 12.5px;
+  font-size: var(--density-font-size);
   transition: background 0.12s, border-color 0.12s, color 0.12s;
   flex-shrink: 0;
   flex-grow: 0;
@@ -178,13 +178,13 @@
 }
 
 .chrome-chip {
-  height: 28px;
+  height: var(--density-chrome-chip-height);
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.035);
   color: rgba(255,255,255,0.82);
   border-radius: 7px;
-  padding: 0 11px;
-  font-size: 11.5px;
+  padding: var(--density-chrome-chip-padding);
+  font-size: calc(var(--density-font-size) - 1px);
   font-weight: 500;
   cursor: pointer;
   white-space: nowrap;
@@ -222,14 +222,14 @@
 
 .chrome-chip.help {
   font-weight: 700;
-  width: 28px;
+  width: var(--density-chrome-chip-height);
   padding: 0;
   text-align: center;
 }
 
 .chrome-icon {
-  width: 32px;
-  height: 30px;
+  width: calc(var(--density-tab-height) + 2px);
+  height: var(--density-tab-height);
   border: 1px solid rgba(255,255,255,0.06);
   background: rgba(255,255,255,0.04);
   color: rgba(255,255,255,0.7);
@@ -252,11 +252,11 @@
 }
 
 .chrome-readout {
-  height: 28px;
+  height: var(--density-chrome-readout-height);
   display: inline-flex;
   align-items: center;
   color: rgba(255,255,255,0.55);
-  font-size: 11px;
+  font-size: var(--density-chrome-readout-font-size);
   white-space: nowrap;
   font-family: 'JetBrains Mono', monospace;
   min-width: 38px;

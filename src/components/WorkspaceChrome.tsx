@@ -2,7 +2,6 @@ import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { useWorkspaceStore } from '../store/workspaceStore'
 import { executeWorkspaceCommand } from '../workspaceCommands'
 import TabContextMenu from './TabContextMenu'
-import ThemeMenu from './ThemeMenu'
 import './WorkspaceChrome.css'
 
 const WorkspaceChrome: React.FC = () => {
@@ -14,7 +13,6 @@ const WorkspaceChrome: React.FC = () => {
     selectedPanelIds,
     minimapVisible,
     sidebarOpen,
-    theme,
     createTab,
     switchTab,
     closeTab,
@@ -35,7 +33,7 @@ const WorkspaceChrome: React.FC = () => {
     markTabSaved
   } = useWorkspaceStore()
 
-  const [themeMenu, setThemeMenu] = useState<{ x: number; y: number } | null>(null)
+
   const [renamingTabId, setRenamingTabId] = useState<string | null>(null)
   const [tabDraft, setTabDraft] = useState('')
   const [dragTabId, setDragTabId] = useState<string | null>(null)
@@ -266,17 +264,13 @@ const WorkspaceChrome: React.FC = () => {
         <input ref={fileInputRef} type="file" accept="application/json" style={{ display: 'none' }} onChange={handleImportFile} />
         <button
           className="chrome-chip ghost"
-          onClick={(e) => {
-            const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
-            setThemeMenu({ x: r.left, y: r.bottom + 4 })
-          }}
-          title="Theme — click to choose, Ctrl+Shift+T to cycle"
-        >◐ {theme}</button>
-        <button
-          className="chrome-chip ghost"
           onClick={() => useWorkspaceStore.getState().toggleSettings()}
-          title="Preferences (Ctrl+,)"
-        >⚙</button>
+          title="Preferences & Settings (Ctrl+,)"
+          style={{ display: 'flex', alignItems: 'center', gap: 4 }}
+        >
+          <i className="ti ti-settings" style={{ fontSize: 13 }} />
+          <span>Settings</span>
+        </button>
         <button className="chrome-chip ghost help" onClick={toggleHelp} title="Keyboard shortcuts (?)">?</button>
         <button
           className="chrome-chip ghost"
@@ -297,7 +291,7 @@ const WorkspaceChrome: React.FC = () => {
           </div>
         )}
       </div>
-      {themeMenu && <ThemeMenu anchor={themeMenu} onClose={() => setThemeMenu(null)} />}
+
       {tabCtxMenu && (
         <TabContextMenu
           tabId={tabCtxMenu.id}

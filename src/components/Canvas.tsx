@@ -7,7 +7,7 @@ import { confirmPanelsDeletion } from '../panelDeletion'
 import AnnotationLayer from './AnnotationLayer'
 import DrawingCanvas from './DrawingCanvas'
 import AnnotateToolbar from './AnnotateToolbar'
-import { executeWorkspaceCommand } from '../workspaceCommands'
+import { executeWorkspaceCommand, getPanelDefaults } from '../workspaceCommands'
 import './Canvas.css'
 
 const MIN_ZOOM = 0.1
@@ -49,7 +49,9 @@ const Canvas: React.FC = () => {
     resizePanel,
     deletePanel,
     annotateMode,
-    annotateTool
+    annotateTool,
+    prefs,
+    addPanel
   } = useWorkspaceStore()
 
   // Keep a mutable ref of the current viewport for IPC handler
@@ -144,6 +146,7 @@ const Canvas: React.FC = () => {
     if (e.target === containerRef.current || e.target === contentRef.current || (e.target as HTMLElement).closest('.canvas-content') === contentRef.current) {
       // Don't pan when clicking on annotation elements — they handle their own drag.
       if ((e.target as HTMLElement).closest('.anno-image, .anno-sticky, .anno-label')) return
+      // Clear annotation selection on any empty-canvas click.
       useWorkspaceStore.getState().clearAnnotationSelection()
       if (e.shiftKey) {
         const rect = containerRef.current?.getBoundingClientRect()
@@ -154,7 +157,6 @@ const Canvas: React.FC = () => {
         return
       }
       if (e.ctrlKey || e.metaKey) return
-      useWorkspaceStore.getState().clearAnnotationSelection()
       setIsPanning(true)
       setPanStart({ x: e.clientX - viewport.x, y: e.clientY - viewport.y })
       clearSelection()
@@ -237,17 +239,11 @@ const Canvas: React.FC = () => {
     setIsPanning(false)
   }, [panels, selectMultiple, selectionBox, viewport])
 
-  const handlePanelSelect = useCallback((panelId: string, additive = false) => {
-    selectPanel(panelId, additive)
-  }, [selectPanel])
-
-  const handlePanelMove = useCallback((panelId: string, x: number, y: number) => {
-    movePanel(panelId, x, y)
-  }, [movePanel])
-
-  const handlePanelResize = useCallback((panelId: string, width: number, height: number) => {
-    resizePanel(panelId, width, height)
-  }, [resizePanel])
+  // These are thin stable references — panel event handlers pass them as props.
+  // Using the store actions directly since they are stable references from Zustand.
+  const handlePanelSelect = selectPanel
+  const handlePanelMove = movePanel
+  const handlePanelResize = resizePanel
 
   const deleteSelectedPanelsWithConfirmation = useCallback(() => {
     if (selectedPanelIds.length === 0) return
@@ -322,6 +318,17 @@ const Canvas: React.FC = () => {
          (!!activePanelBody && !inRegionBody(activePanelBody)) ||
          target?.tagName === 'WEBVIEW' ||
          active?.tagName === 'WEBVIEW')
+
+      const stateForOverlay = useWorkspaceStore.getState()
+      const isOverlayOpen =
+        stateForOverlay.settingsOpen ||
+        stateForOverlay.commandPaletteOpen ||
+        stateForOverlay.panelFinderOpen ||
+        stateForOverlay.helpOpen ||
+        stateForOverlay.globalSearchOpen ||
+        stateForOverlay.winTabOpen ||
+        stateForOverlay.panelSwitcherOpen
+      if (isOverlayOpen) return
 
       // Hard block: while typing or while an embedded panel app is focused, no canvas shortcut fires.
       if (isTextInput || isInsidePanelBody) return
@@ -511,7 +518,7 @@ const Canvas: React.FC = () => {
     }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const handleGestureChange = (e: any) => {
+    const handleGestureChange = (e: any) => {
       const rect = container.getBoundingClientRect()
       const centerX = e.clientX - rect.left
       const centerY = e.clientY - rect.top
@@ -646,15 +653,43 @@ const handleGestureChange = (e: any) => {
     return () => document.removeEventListener('paste', handlePaste)
   }, [])
 
-  // Drag & drop image files onto canvas.
+  // Drag & drop files or images onto canvas.
   const handleDragOver = useCallback((e: React.DragEvent) => {
-    if (e.dataTransfer?.types?.includes('Files')) {
+    const types = e.dataTransfer?.types || []
+    if (types.includes('Files') || types.includes('application/x-wts-path')) {
       e.preventDefault()
       e.dataTransfer.dropEffect = 'copy'
     }
   }, [])
 
   const handleDrop = useCallback(async (e: React.DragEvent) => {
+    const customData = e.dataTransfer?.getData('application/x-wts-path')
+    if (customData) {
+      e.preventDefault()
+      try {
+        const { path, isDir } = JSON.parse(customData)
+        if (!isDir) {
+          const rect = containerRef.current?.getBoundingClientRect()
+          const dropX = rect ? (e.clientX - rect.left - viewport.x) / viewport.zoom : 100
+          const dropY = rect ? (e.clientY - rect.top - viewport.y) / viewport.zoom : 100
+          const name = path.split('/').pop() || 'editor'
+          const id = `panel-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+          
+          useWorkspaceStore.getState().addPanel({
+            id, type: 'editor',
+            x: dropX - 400, y: dropY - 250, width: 800, height: 500,
+            title: name,
+            settings: { filePath: path, folderPath: path.replace(/\/[^/]*$/, '') },
+            createdAt: Date.now()
+          })
+          useWorkspaceStore.getState().selectPanel(id)
+          return
+        }
+      } catch (err) {
+        console.error('Failed to parse dropped file custom data', err)
+      }
+    }
+
     const files = e.dataTransfer?.files
     if (!files) return
     for (let i = 0; i < files.length; i++) {
@@ -729,7 +764,15 @@ const handleGestureChange = (e: any) => {
   return (
     <div
       ref={containerRef}
-      className={`canvas-container ${isPanning ? 'grabbing' : ''} ${annotateMode ? `annotating annotate-${annotateTool}` : ''}`}
+      className={`canvas-container bg-${prefs.canvasGridStyle ?? 'none'} ${isPanning ? 'grabbing' : ''} ${annotateMode ? `annotating annotate-${annotateTool}` : ''}`}
+      style={{
+        backgroundImage: prefs.canvasBgImage ? `url(${prefs.canvasBgImage})` : undefined,
+        backgroundSize: prefs.canvasBgImage ? 'cover' : undefined,
+        backgroundPosition: prefs.canvasBgImage ? 'center' : undefined,
+        ['--canvas-bg-color' as string]: prefs.canvasBgColor || undefined,
+        ['--canvas-grid-size' as string]: `${prefs.canvasGridSize ?? 20}px`,
+        ['--canvas-grid-major' as string]: `${(prefs.canvasGridSize ?? 20) * 5}px`,
+      }}
       onWheel={handleWheel}
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
@@ -750,6 +793,37 @@ const handleGestureChange = (e: any) => {
         const worldX = (e.clientX - rect.left - viewport.x) / viewport.zoom
         const worldY = (e.clientY - rect.top - viewport.y) / viewport.zoom
         setCanvasCtxMenu({ x: e.clientX, y: e.clientY, worldX, worldY })
+      }}
+      onDoubleClick={(e) => {
+        const target = e.target as HTMLElement
+        if (
+          target.closest('.panel') ||
+          target.closest('.minimap') ||
+          target.closest('.annotate-toolbar') ||
+          target.closest('.status-bar') ||
+          target.closest('.workspace-chrome')
+        ) return
+
+        const option = prefs.doubleClickToCreate || 'none'
+        if (option === 'none') return
+
+        const rect = containerRef.current?.getBoundingClientRect()
+        if (!rect) return
+        const worldX = (e.clientX - rect.left - viewport.x) / viewport.zoom
+        const worldY = (e.clientY - rect.top - viewport.y) / viewport.zoom
+
+        const defaults = getPanelDefaults(option)
+        if (!defaults) return
+        const id = `${option}-${Date.now()}`
+        const newPanel = {
+          id,
+          type: option,
+          x: worldX - defaults.width / 2,
+          y: worldY - defaults.height / 2,
+          ...defaults
+        }
+        addPanel(newPanel)
+        selectPanel(id)
       }}
     >
       <div

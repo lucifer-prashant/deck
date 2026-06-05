@@ -18,6 +18,25 @@ release
 .env.local
 .env.*.local
 
+# Security/Credentials
+*.pem
+*.key
+*.crt
+*.pfx
+secrets.json
+config/local.json
+credentials.json
+.auth/
+.secrets/
+
+# Electron/Browser data
+userData/
+Cookies
+Local Storage/
+Session Storage/
+IndexedDB/
+browser-workspace.json
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

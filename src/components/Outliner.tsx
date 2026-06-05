@@ -31,7 +31,8 @@ const Outliner: React.FC = () => {
     switchTab,
     toggleOutliner,
     updatePanel,
-    deletePanel
+    deletePanel,
+    prefs
   } = useWorkspaceStore()
   const [query, setQuery] = useState('')
   const [renamingId, setRenamingId] = useState<string | null>(null)
@@ -165,7 +166,8 @@ const Outliner: React.FC = () => {
     const isActiveTab = tabId === activeTabId
     const isSel = isActiveTab && selectedPanelIds.includes(p.id)
     const isFocused = idx === focusedIdx
-    const lazyLoad = (p.settings as { lazyLoad?: boolean } | undefined)?.lazyLoad
+    const rawLazy = (p.settings as { lazyLoad?: boolean } | undefined)?.lazyLoad
+    const lazyLoad = rawLazy !== undefined ? rawLazy : (p.type === 'browser' ? prefs.browserLazyLoad : false)
     const healthState = p.healthState || (lazyLoad ? 'sleeping' : 'alive')
     const healthColor = HEALTH_COLOR[healthState]
     return (
@@ -285,7 +287,8 @@ const Outliner: React.FC = () => {
                   <span className={`outliner-type t-${p.type}`}>{TYPE_LABEL[p.type] || p.type}</span>
                   {p.color && <span className="outliner-color" style={{ background: p.color }} />}
                   {(() => {
-                    const ll = (p.settings as { lazyLoad?: boolean } | undefined)?.lazyLoad
+                    const rawL = (p.settings as { lazyLoad?: boolean } | undefined)?.lazyLoad
+                    const ll = rawL !== undefined ? rawL : (p.type === 'browser' ? prefs.browserLazyLoad : false)
                     const hs = p.healthState || (ll ? 'sleeping' : 'alive')
                     const hc = HEALTH_COLOR[hs]
                     return (

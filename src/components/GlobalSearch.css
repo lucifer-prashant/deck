@@ -12,9 +12,9 @@
 .gs-panel {
   width: min(720px, calc(100vw - 64px));
   max-height: calc(100vh - 160px);
-  background: rgba(28,30,34,0.98);
+  background: var(--modal-bg, rgba(28,30,34,0.98));
   color: #e6e8ec;
-  border: 1px solid rgba(255,255,255,0.08);
+  border: 1px solid var(--modal-border, rgba(255,255,255,0.08));
   border-radius: 12px;
   box-shadow: 0 24px 64px rgba(0,0,0,0.45);
   display: flex;
@@ -135,9 +135,9 @@
 
 /* Light theme */
 [data-theme='light'] .gs-panel {
-  background: rgba(255,255,255,0.99);
+  background: var(--modal-bg, rgba(255,255,255,0.99));
   color: #1a1d22;
-  border-color: rgba(0,0,0,0.08);
+  border-color: var(--modal-border, rgba(0,0,0,0.08));
   box-shadow: 0 24px 64px rgba(0,0,0,0.18);
 }
 [data-theme='light'] .gs-head { border-bottom-color: rgba(0,0,0,0.06); }

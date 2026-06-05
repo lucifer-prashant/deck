@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useCallback, useMemo } from 'react'
 import { useWorkspaceStore, Point } from '../store/workspaceStore'
 import { getAnchorPoint, generateWigglyPath, generateArrowhead } from '../annotationUtils'
-import type { Annotation } from '../store/workspaceStore'
+import type { Annotation, Panel } from '../store/workspaceStore'
 
 const MIN_POINTS_FOR_STROKE = 2
 const MARGIN = 400
@@ -20,6 +20,7 @@ const DrawingCanvas: React.FC = () => {
   const annotationsBehindPanels = useWorkspaceStore(s => s.annotationsBehindPanels)
   const drawColor = useWorkspaceStore(s => s.drawColor)
   const drawStrokeWidth = useWorkspaceStore(s => s.drawStrokeWidth)
+  const panels = useWorkspaceStore(s => s.panels)
   const annotations = useWorkspaceStore(s =>
     s.tabs.find(t => t.id === s.activeTabId)?.annotations || []
   )
@@ -80,12 +81,12 @@ const DrawingCanvas: React.FC = () => {
       ctx.save()
       ctx.translate(-ox, -oy)
       if (a.type === 'freehand') drawFreehand(ctx, a)
-      else if (a.type === 'arrow') drawArrow(ctx, a)
+      else if (a.type === 'arrow') drawArrow(ctx, a, panels)
       else if (a.type === 'rectangle') drawRectangle(ctx, a)
       else if (a.type === 'highlight') drawHighlight(ctx, a)
       ctx.restore()
     })
-  }, [drawingAnnotations, annotationsVisible, canvasX, canvasY])
+  }, [drawingAnnotations, annotationsVisible, canvasX, canvasY, panels])
 
   useEffect(() => { draw() }, [draw, viewport.x, viewport.y, viewport.zoom])
 
@@ -219,13 +220,14 @@ const DrawingCanvas: React.FC = () => {
               if (bb) ctx.strokeRect(bb.x - 3, bb.y - 3, bb.width + 6, bb.height + 6)
             }
           } else if (hit.type === 'arrow') {
-            const pts = resolveArrowPoints(hit)
-            if (pts.startX != null && pts.endX != null) {
-              const x = Math.min(pts.startX, pts.endX) - 4
-              const y = Math.min(pts.startY!, pts.endY!) - 4
-              const wd = Math.abs(pts.endX - pts.startX) + 8
-              const ht = Math.abs(pts.endY! - pts.startY!) + 8
-              ctx.strokeRect(x, y, wd, ht)
+            const panelsState = useWorkspaceStore.getState().panels
+            const pts = resolveArrowRoute(hit, panelsState)
+            if (pts.length >= 2) {
+              const minX = Math.min(...pts.map(p => p.x)) - 4
+              const minY = Math.min(...pts.map(p => p.y)) - 4
+              const maxX = Math.max(...pts.map(p => p.x)) + 4
+              const maxY = Math.max(...pts.map(p => p.y)) + 4
+              ctx.strokeRect(minX, minY, maxX - minX, maxY - minY)
             }
           } else if (hit.type === 'rectangle' || hit.type === 'highlight') {
             ctx.strokeRect(hit.x - 3, hit.y - 3, hit.width + 6, hit.height + 6)
@@ -413,14 +415,23 @@ function hitTest(point: Point, annotations: Annotation[]): Annotation | null {
       continue
     }
     if (a.type === 'arrow') {
-      const { startX, startY, endX, endY } = resolveArrowPoints(a)
-      if (startX == null || startY == null || endX == null || endY == null) continue
-      const minX = Math.min(startX, endX) - 6
-      const minY = Math.min(startY, endY) - 6
-      const maxX = Math.max(startX, endX) + 6
-      const maxY = Math.max(startY, endY) + 6
-      if (point.x >= minX && point.x <= maxX && point.y >= minY && point.y <= maxY) return a
-      continue
+      const panelsState = useWorkspaceStore.getState().panels
+      const pts = resolveArrowRoute(a, panelsState)
+      if (pts.length < 2) return false
+      const minX = Math.min(...pts.map(p => p.x)) - 6
+      const minY = Math.min(...pts.map(p => p.y)) - 6
+      const maxX = Math.max(...pts.map(p => p.x)) + 6
+      const maxY = Math.max(...pts.map(p => p.y)) + 6
+      if (point.x >= minX && point.x <= maxX && point.y >= minY && point.y <= maxY) {
+        // Broad phase box check passed; check segments
+        for (let i = 0; i < pts.length - 1; i++) {
+          const pA = pts[i]
+          const pB = pts[i + 1]
+          const dist = distToSegment(point, pA, pB)
+          if (dist < 8) return true
+        }
+      }
+      return false
     }
     if (a.type === 'rectangle' || a.type === 'highlight') {
       if (pointInRect(point, { x: a.x, y: a.y, width: a.width, height: a.height })) return a
@@ -463,8 +474,7 @@ function drawFreehand(ctx: CanvasRenderingContext2D, a: Annotation) {
   })
 }
 
-function resolveArrowPoints(a: Annotation) {
-  const panels = useWorkspaceStore.getState().panels
+function resolveArrowRoute(a: Annotation, panels: Record<string, Panel>): Point[] {
   let startX = a.startX, startY = a.startY
   let endX = a.endX, endY = a.endY
   if (a.startPanelId) {
@@ -481,12 +491,194 @@ function resolveArrowPoints(a: Annotation) {
       endX = anchor.x; endY = anchor.y
     }
   }
-  return { startX, startY, endX, endY }
+  if (startX == null || startY == null || endX == null || endY == null) return []
+  
+  const start = { x: startX, y: startY }
+  const end = { x: endX, y: endY }
+
+  const obstacles = Object.values(panels)
+    .filter(p => p.type !== 'region' && p.id !== a.startPanelId && p.id !== a.endPanelId)
+    .map(p => {
+      const pad = 16
+      const h = p.minimized ? 34 : p.height
+      return {
+        id: p.id,
+        x1: p.x - pad,
+        y1: p.y - pad,
+        x2: p.x + p.width + pad,
+        y2: p.y + h + pad
+      }
+    })
+
+  let clear = true
+  for (const obs of obstacles) {
+    if (lineIntersectsAABB(start, end, obs)) {
+      clear = false
+      break
+    }
+  }
+  if (clear) return [start, end]
+
+  const V: Point[] = [start, end]
+  obstacles.forEach(obs => {
+    V.push({ x: obs.x1, y: obs.y1 })
+    V.push({ x: obs.x2, y: obs.y1 })
+    V.push({ x: obs.x2, y: obs.y2 })
+    V.push({ x: obs.x1, y: obs.y2 })
+  })
+
+  const padSize = 16
+  if (a.startPanelId && panels[a.startPanelId]) {
+    const p = panels[a.startPanelId]
+    if (p.type !== 'region') {
+      const h = p.minimized ? 34 : p.height
+      V.push({ x: p.x - padSize, y: p.y - padSize })
+      V.push({ x: p.x + p.width + padSize, y: p.y - padSize })
+      V.push({ x: p.x + p.width + padSize, y: p.y + h + padSize })
+      V.push({ x: p.x - padSize, y: p.y + h + padSize })
+    }
+  }
+  if (a.endPanelId && panels[a.endPanelId]) {
+    const p = panels[a.endPanelId]
+    if (p.type !== 'region') {
+      const h = p.minimized ? 34 : p.height
+      V.push({ x: p.x - padSize, y: p.y - padSize })
+      V.push({ x: p.x + p.width + padSize, y: p.y - padSize })
+      V.push({ x: p.x + p.width + padSize, y: p.y + h + padSize })
+      V.push({ x: p.x - padSize, y: p.y + h + padSize })
+    }
+  }
+
+  const n = V.length
+  const dist = new Array(n).fill(Infinity)
+  const prev = new Array(n).fill(-1)
+  const visited = new Array(n).fill(false)
+  dist[0] = 0
+
+  for (let step = 0; step < n; step++) {
+    let u = -1
+    let minDist = Infinity
+    for (let i = 0; i < n; i++) {
+      if (!visited[i] && dist[i] < minDist) {
+        minDist = dist[i]
+        u = i
+      }
+    }
+    if (u === -1) break
+    if (u === 1) break
+
+    visited[u] = true
+    for (let v = 0; v < n; v++) {
+      if (visited[v]) continue
+      const d = Math.hypot(V[v].x - V[u].x, V[v].y - V[u].y)
+      if (isVisible(V[u], V[v], obstacles)) {
+        const newDist = dist[u] + d
+        if (newDist < dist[v]) {
+          dist[v] = newDist
+          prev[v] = u
+        }
+      }
+    }
+  }
+
+  if (dist[1] === Infinity) return [start, end]
+
+  const path: Point[] = []
+  let curr = 1
+  while (curr !== -1) {
+    path.push(V[curr])
+    curr = prev[curr]
+  }
+  path.reverse()
+  return path
 }
 
-function drawArrow(ctx: CanvasRenderingContext2D, a: Annotation) {
-  const { startX, startY, endX, endY } = resolveArrowPoints(a)
-  if (startX == null || startY == null || endX == null || endY == null) return
+function isVisible(p1: Point, p2: Point, obstacles: Array<{ id: string; x1: number; y1: number; x2: number; y2: number }>): boolean {
+  if (Math.hypot(p2.x - p1.x, p2.y - p1.y) < 1.0) return true
+  for (const obs of obstacles) {
+    let checkP1 = p1
+    let checkP2 = p2
+    const isCorner1 = (p1.x === obs.x1 || p1.x === obs.x2) && (p1.y === obs.y1 || p1.y === obs.y2)
+    const isCorner2 = (p2.x === obs.x1 || p2.x === obs.x2) && (p2.y === obs.y1 || p2.y === obs.y2)
+    if (isCorner1 || isCorner2) {
+      const dx = p2.x - p1.x
+      const dy = p2.y - p1.y
+      if (isCorner1) checkP1 = { x: p1.x + dx * 0.05, y: p1.y + dy * 0.05 }
+      if (isCorner2) checkP2 = { x: p2.x - dx * 0.05, y: p2.y - dy * 0.05 }
+    }
+    if (lineIntersectsAABB(checkP1, checkP2, obs)) return false
+  }
+  return true
+}
+
+function lineIntersectsAABB(p1: Point, p2: Point, box: { x1: number; y1: number; x2: number; y2: number }): boolean {
+  let t0 = 0.0
+  let t1 = 1.0
+  const dx = p2.x - p1.x
+  const dy = p2.y - p1.y
+  const edges = [
+    [-dx, p1.x - box.x1],
+    [dx, box.x2 - p1.x],
+    [-dy, p1.y - box.y1],
+    [dy, box.y2 - p1.y]
+  ]
+  for (const [p, q] of edges) {
+    if (p === 0) {
+      if (q < 0) return false
+    } else {
+      const r = q / p
+      if (p < 0) {
+        if (r > t1) return false
+        if (r > t0) t0 = r
+      } else {
+        if (r < t0) return false
+        if (r < t1) t1 = r
+      }
+    }
+  }
+  return t0 <= t1
+}
+
+function generateRoundedPath(path: Point[], radius: number = 12): string {
+  if (path.length === 0) return ''
+  if (path.length === 1) return `M ${path[0].x} ${path[0].y}`
+  if (path.length === 2) return `M ${path[0].x} ${path[0].y} L ${path[1].x} ${path[1].y}`
+  let d = `M ${path[0].x} ${path[0].y}`
+  for (let i = 1; i < path.length - 1; i++) {
+    const prev = path[i - 1]
+    const curr = path[i]
+    const next = path[i + 1]
+    const dx1 = prev.x - curr.x
+    const dy1 = prev.y - curr.y
+    const d1 = Math.hypot(dx1, dy1) || 1
+    const dx2 = next.x - curr.x
+    const dy2 = next.y - curr.y
+    const d2 = Math.hypot(dx2, dy2) || 1
+    const r = Math.min(radius, d1 / 2, d2 / 2)
+    const startX = curr.x + (dx1 / d1) * r
+    const startY = curr.y + (dy1 / d1) * r
+    const endX = curr.x + (dx2 / d2) * r
+    const endY = curr.y + (dy2 / d2) * r
+    d += ` L ${startX} ${startY} Q ${curr.x} ${curr.y}, ${endX} ${endY}`
+  }
+  const last = path[path.length - 1]
+  d += ` L ${last.x} ${last.y}`
+  return d
+}
+
+function distToSegment(p: Point, a: Point, b: Point): number {
+  const l2 = Math.pow(b.x - a.x, 2) + Math.pow(b.y - a.y, 2)
+  if (l2 === 0) return Math.hypot(p.x - a.x, p.y - a.y)
+  let t = ((p.x - a.x) * (b.x - a.x) + (p.y - a.y) * (b.y - a.y)) / l2
+  t = Math.max(0, Math.min(1, t))
+  return Math.hypot(p.x - (a.x + t * (b.x - a.x)), p.y - (a.y + t * (b.y - a.y)))
+}
+
+function drawArrow(ctx: CanvasRenderingContext2D, a: Annotation, panels: Record<string, Panel>) {
+  const path = resolveArrowRoute(a, panels)
+  if (path.length < 2) return
+  const endPt = path[path.length - 1]
+  const secondToLast = path[path.length - 2]
   const color = a.color || '#ffffff'
   ctx.strokeStyle = color
   ctx.fillStyle = color
@@ -496,15 +688,18 @@ function drawArrow(ctx: CanvasRenderingContext2D, a: Annotation) {
   if (a.dashed) ctx.setLineDash([6, 4])
   else ctx.setLineDash([])
 
-  const pathStr = generateWigglyPath(startX, startY, endX, endY, 0.35)
+  const pathStr = generateRoundedPath(path, 16)
   ctx.stroke(new Path2D(pathStr))
 
-  const headPath = new Path2D(generateArrowhead(startX, startY, endX, endY))
+  const headPath = new Path2D(generateArrowhead(secondToLast.x, secondToLast.y, endPt.x, endPt.y))
   ctx.fill(headPath)
 
   if (a.arrowLabel) {
-    const mx = (startX + endX) / 2
-    const my = (startY + endY) / 2
+    const midIdx = Math.floor(path.length / 2)
+    const pA = path[midIdx - 1]
+    const pB = path[midIdx]
+    const mx = (pA.x + pB.x) / 2
+    const my = (pA.y + pB.y) / 2
     ctx.font = '12px sans-serif'
     ctx.fillStyle = color
     ctx.textAlign = 'center'

@@ -57,7 +57,13 @@ const dualStorage = {
     const eapiW = window.electronAPI
     getAppDataHome().then(home => {
       if (home && eapiW?.file?.write) {
-        eapiW.file.write(`${home}/.config/deck/${name}.json`, value).catch(() => null)
+        let prettyValue = value
+        try {
+          prettyValue = JSON.stringify(JSON.parse(value), null, 2)
+        } catch {
+          // Ignore parse errors, write raw value
+        }
+        eapiW.file.write(`${home}/.config/deck/${name}.json`, prettyValue).catch(() => null)
       }
     }).catch(() => null)
   },
@@ -72,7 +78,7 @@ const dualStorage = {
   }
 }
 
-export type Theme = 'dark' | 'midnight' | 'light' | 'system'
+
 
 export interface Panel {
   id: string
@@ -248,13 +254,37 @@ export interface WorkspaceState {
     animations: boolean
     snapStep: number  // px in world coords
     showCursorReadout: boolean
+    editorFontSize: number
+    editorWordWrap: 'on' | 'off'
+    editorFontFamily: string
+    terminalFontSize: number
+    terminalFontFamily: string
+    browserHomeUrl: string
+    browserLazyLoad: boolean
+    doubleClickToCreate: 'none' | 'terminal' | 'editor' | 'browser'
+    defaultTerminalShell: string
+    terminalScrollback: number
+    panelHeaderDoubleClick: 'none' | 'minimize' | 'focus' | 'rename'
+    defaultPanelWidthTerminal: number
+    defaultPanelHeightTerminal: number
+    defaultPanelWidthEditor: number
+    defaultPanelHeightEditor: number
+    defaultPanelWidthBrowser: number
+    defaultPanelHeightBrowser: number
+    canvasGridStyle: 'grid' | 'dot' | 'blueprint' | 'neon' | 'none'
+    canvasGridSize: number
+    canvasBgImage: string
+    canvasBgColor: string
+    customBgColors: Record<string, string>
+    panelGlassOpacity: number
+    panelGlassBlur: number
   }
   minimapVisible: boolean
   outlinerOpen: boolean
   helpOpen: boolean
   statusBarVisible: boolean
   chromeVisible: boolean
-  theme: Theme
+
   past: HistorySnapshot[]
   future: HistorySnapshot[]
   jumpMode: JumpMode
@@ -269,6 +299,7 @@ export interface WorkspaceState {
   sidebarSection: SidebarSection
   presetGraveyards: PresetGraveyards
   canvasPresets: Record<string, CanvasPreset>
+  viewportBookmarks: Record<number, Viewport>
   // Per-section pin: when set, that section ignores active-panel changes and stays on its pinned target.
   sidebarPin: { explorer?: string; git?: string }
   hiddenSidebarSections: SidebarSection[]
@@ -293,6 +324,7 @@ export interface WorkspaceState {
   winTabSessionPanels: string[]  // MRU snapshot on open
   // Cursor world position — updated by Canvas on mouse move, used for panel spawning.
   cursorWorldPos: { x: number; y: number }
+  keybindings: Record<string, string>
 
   setHeaderActivePanel: (id: string | null) => void
   setBodyActivePanel: (id: string | null) => void
@@ -327,8 +359,7 @@ export interface WorkspaceState {
   setBarsVisible: (visible: boolean) => void
   // Distraction-free focus: hide chrome + status bar + minimap in one shot.
   enterFocusMode: () => void
-  setTheme: (theme: Theme) => void
-  cycleTheme: () => void
+
   createTab: (title?: string) => void
   loadPreset: (name: 'life' | 'no-life') => void
   switchTab: (id: string) => void
@@ -392,7 +423,47 @@ export interface WorkspaceState {
   overwriteCanvasPreset: (id: string) => void
   loadCanvasPreset: (id: string) => void
   deleteCanvasPreset: (id: string) => void
+  renameCanvasPreset: (id: string, name: string) => void
+  saveViewportBookmark: (num: number) => void
+  loadViewportBookmark: (num: number) => void
   findOrCreateScratchpad: () => void
+  loadKeybindingsFromFile: () => Promise<void>
+  updateKeybinding: (command: string, keyCombo: string) => Promise<void>
+  resetKeybindings: () => Promise<void>
+}
+
+export const DEFAULT_KEYBINDINGS: Record<string, string> = {
+  'toggle-help': '?',
+  'rename-selected': 'f2',
+  'focus-selected': 'f',
+  'toggle-minimap': 'm',
+  'toggle-annotate-mode': 'a',
+  'toggle-command-palette': 'ctrl+p',
+  'toggle-settings': 'ctrl+,',
+  'toggle-panel-finder': 'ctrl+f',
+  'toggle-sidebar': 'ctrl+shift+b',
+  'new-browser': 'ctrl+b',
+  'undo': 'ctrl+z',
+  'redo': 'ctrl+y',
+  'toggle-bars': 'ctrl+\\',
+  'load-preset-life': 'ctrl+shift+l',
+  'load-preset-nolife': 'ctrl+shift+k',
+  'arrange-selected': 'ctrl+shift+a',
+  'find-scratchpad': 'ctrl+shift+space',
+  'open-wintab-switcher': 'meta+tab',
+  'toggle-panel-switcher': 'ctrl+tab',
+  'new-terminal': 'ctrl+shift+t',
+  'new-editor': 'ctrl+alt+n',
+  'new-region': 'ctrl+alt+r',
+  'zoom-in': 'ctrl+=',
+  'zoom-out': 'ctrl+-',
+  'reset-viewport': 'ctrl+0',
+  'fit-all': 'ctrl+1',
+  'toggle-lock': 'ctrl+l',
+  'toggle-minimize': 'ctrl+alt+m',
+  'toggle-pin-front': 'alt+p',
+  'bring-front': ']',
+  'send-back': '[',
 }
 
 const createEmptyTab = (title = 'Canvas'): WorkspaceTab => ({
@@ -449,6 +520,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       tabs: [initialTab],
       activeTabId: initialTab.id,
       projectId: null,
+      keybindings: DEFAULT_KEYBINDINGS,
       commandPaletteOpen: false,
       panelFinderOpen: false,
       globalSearchOpen: false,
@@ -456,13 +528,43 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       selectedAnnotationIds: [],
       renameRequestId: null,
       stackDropTargetId: null,
-      prefs: { fontSize: 13, density: 'cozy', animations: true, snapStep: 20, showCursorReadout: true },
+      prefs: {
+        fontSize: 13,
+        density: 'cozy',
+        animations: true,
+        snapStep: 20,
+        showCursorReadout: true,
+        editorFontSize: 14,
+        editorWordWrap: 'off',
+        editorFontFamily: "'JetBrainsMono Nerd Font', 'JetBrains Mono', 'Fira Code', 'SF Mono', Menlo, monospace",
+        terminalFontSize: 15,
+        terminalFontFamily: "'JetBrainsMono Nerd Font', 'JetBrains Mono', 'Fira Code', 'SF Mono', 'Cascadia Code', Menlo, monospace",
+        browserHomeUrl: 'https://google.com',
+        browserLazyLoad: false,
+        doubleClickToCreate: 'none',
+        defaultTerminalShell: '',
+        terminalScrollback: 10000,
+        panelHeaderDoubleClick: 'rename',
+        defaultPanelWidthTerminal: 600,
+        defaultPanelHeightTerminal: 400,
+        defaultPanelWidthEditor: 1100,
+        defaultPanelHeightEditor: 760,
+        defaultPanelWidthBrowser: 720,
+        defaultPanelHeightBrowser: 560,
+        canvasGridStyle: 'none',
+        canvasGridSize: 20,
+        canvasBgImage: '',
+        canvasBgColor: '',
+        customBgColors: {},
+        panelGlassOpacity: 0.85,
+        panelGlassBlur: 12
+      },
       minimapVisible: true,
       outlinerOpen: false,
       helpOpen: false,
       statusBarVisible: true,
       chromeVisible: true,
-      theme: 'dark',
+
       past: [],
       future: [],
       jumpMode: { active: false, letters: {} },
@@ -477,6 +579,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       hiddenSidebarSections: [],
       presetGraveyards: {},
       canvasPresets: {},
+      viewportBookmarks: {},
       annotateMode: false,
       annotateTool: 'freehand',
       annotationsVisible: true,
@@ -674,10 +777,26 @@ export const useWorkspaceStore = create<WorkspaceState>()(
 
       setProject: (projectId) => set({ projectId }),
 
-      toggleCommandPalette: () => set((state) => ({ commandPaletteOpen: !state.commandPaletteOpen })),
-      togglePanelFinder: () => set((state) => ({ panelFinderOpen: !state.panelFinderOpen })),
-      toggleGlobalSearch: () => set((state) => ({ globalSearchOpen: !state.globalSearchOpen })),
-      toggleSettings: () => set((state) => ({ settingsOpen: !state.settingsOpen })),
+      toggleCommandPalette: () => set((state) => {
+        const next = !state.commandPaletteOpen
+        if (next) window.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+        return { commandPaletteOpen: next }
+      }),
+      togglePanelFinder: () => set((state) => {
+        const next = !state.panelFinderOpen
+        if (next) window.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+        return { panelFinderOpen: next }
+      }),
+      toggleGlobalSearch: () => set((state) => {
+        const next = !state.globalSearchOpen
+        if (next) window.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+        return { globalSearchOpen: next }
+      }),
+      toggleSettings: () => set((state) => {
+        const next = !state.settingsOpen
+        if (next) window.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+        return { settingsOpen: next }
+      }),
       updatePrefs: (partial) => set((state) => ({ prefs: { ...state.prefs, ...partial } })),
       requestRename: (id) => set({ renameRequestId: id }),
       setPanelFinderOpen: (open) => set({ panelFinderOpen: open }),
@@ -693,12 +812,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       }),
       setBarsVisible: (visible) => set({ chromeVisible: visible, statusBarVisible: visible }),
       enterFocusMode: () => set({ chromeVisible: false, statusBarVisible: false, minimapVisible: false }),
-      setTheme: (theme) => set({ theme }),
-      cycleTheme: () => set((state) => {
-        const order: Theme[] = ['dark', 'midnight', 'light', 'system']
-        const next = order[(order.indexOf(state.theme) + 1) % order.length]
-        return { theme: next }
-      }),
+
 
       createTab: (title) =>
         set((state) => {
@@ -735,7 +849,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       //     user's last-known positions/sizes/settings are preserved across full close
       //     + reopen.
       loadPreset: (name) => {
-        import('../presets').then(({ buildPresetPanels, presetTabMeta, presetPanelId }) => {
+        import('../presets').then(({ buildPresetPanels, presetTabMeta }) => {
           const meta = presetTabMeta(name)
           const cur = get()
           const kind = `preset:${name}` as 'preset:life' | 'preset:no-life'
@@ -842,7 +956,6 @@ export const useWorkspaceStore = create<WorkspaceState>()(
               panelMap[id] = data as Panel
             }
           })
-          void presetPanelId
           const fitted = fitViewportToPanels(panelMap)
           const tab: WorkspaceTab = {
             id: `tab-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -1005,7 +1118,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           )
         }
 
-        console.log('Workspace initialized')
+        get().loadKeybindingsFromFile().catch(() => null)
       },
 
       getPanelsByType: (type) => Object.values(get().panels).filter(p => p.type === type),
@@ -1014,12 +1127,10 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       movePanel: (id, x, y) =>
         set((state) => {
           if (!state.panels[id] || state.panels[id].locked) return state
-          const nx = x
-          const ny = y
           const panel = state.panels[id]
-          const dx = nx - panel.x
-          const dy = ny - panel.y
-          const panels = { ...state.panels, [id]: { ...panel, x: nx, y: ny } }
+          const dx = x - panel.x
+          const dy = y - panel.y
+          const panels = { ...state.panels, [id]: { ...panel, x, y } }
           if (panel.type === 'region' && panel.children) {
             panel.children.forEach(childId => {
               const child = panels[childId]
@@ -1041,10 +1152,17 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           return { panels, ...syncActiveTab(state, { panels }) }
         }),
 
+      // Helper: when in annotate mode, capture current annotations for undo history.
+      // Called before any mutation that changes the visible annotation set.
+      //
+      // SHALLOW-CLONE INVARIANT: Annotation objects have one array field (pathData).
+      // This spread is safe as long as pathData is always *replaced* (annotation.pathData = [...])
+      // never mutated in-place (annotation.pathData.push(...)). All write sites in
+      // DrawingCanvas.tsx currently comply. If that ever changes, upgrade to a deep clone here.
       addAnnotation: (a) => set((state) => {
         const tab = state.tabs.find(t => t.id === state.activeTabId)
         const base = state.annotateMode
-          ? { annotationPast: [...state.annotationPast.slice(-59), JSON.parse(JSON.stringify(tab?.annotations || []))], annotationFuture: [] as Annotation[][] }
+          ? { annotationPast: [...state.annotationPast.slice(-59), (tab?.annotations || []).map(x => ({ ...x }))], annotationFuture: [] as Annotation[][] }
           : {}
         return {
           tabs: state.tabs.map(t =>
@@ -1058,7 +1176,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       updateAnnotation: (id, updates) => set((state) => {
         const tab = state.tabs.find(t => t.id === state.activeTabId)
         const base = state.annotateMode
-          ? { annotationPast: [...state.annotationPast.slice(-59), JSON.parse(JSON.stringify(tab?.annotations || []))], annotationFuture: [] as Annotation[][] }
+          ? { annotationPast: [...state.annotationPast.slice(-59), (tab?.annotations || []).map(x => ({ ...x }))], annotationFuture: [] as Annotation[][] }
           : {}
         return {
           tabs: state.tabs.map(t =>
@@ -1072,7 +1190,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       deleteAnnotation: (id) => set((state) => {
         const tab = state.tabs.find(t => t.id === state.activeTabId)
         const base = state.annotateMode
-          ? { annotationPast: [...state.annotationPast.slice(-59), JSON.parse(JSON.stringify(tab?.annotations || []))], annotationFuture: [] as Annotation[][] }
+          ? { annotationPast: [...state.annotationPast.slice(-59), (tab?.annotations || []).map(x => ({ ...x }))], annotationFuture: [] as Annotation[][] }
           : {}
         return {
           tabs: state.tabs.map(t =>
@@ -1096,7 +1214,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           annotateMode: entering,
           annotateTool: entering ? 'select' : state.annotateTool,
           // Capture baseline on enter, clear history on exit.
-          annotationPast: entering ? [JSON.parse(JSON.stringify(tab?.annotations || []))] : [],
+          annotationPast: entering ? [(tab?.annotations || []).map(x => ({ ...x }))] : [],
           annotationFuture: [],
         }
       }),
@@ -1110,7 +1228,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       // Annotation-only undo/redo — snapshots the active tab's annotations array.
       pushAnnotationHistory: () => set(state => {
         const tab = state.tabs.find(t => t.id === state.activeTabId)
-        const annos = tab?.annotations ? JSON.parse(JSON.stringify(tab.annotations)) as Annotation[] : []
+        const annos = (tab?.annotations || []).map(x => ({ ...x }))
         return {
           annotationPast: [...state.annotationPast.slice(-59), annos],
           annotationFuture: []
@@ -1119,7 +1237,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       undoAnnotation: () => set(state => {
         if (state.annotationPast.length === 0) return state
         const tab = state.tabs.find(t => t.id === state.activeTabId)
-        const current = tab?.annotations ? JSON.parse(JSON.stringify(tab.annotations)) as Annotation[] : []
+        const current = (tab?.annotations || []).map(x => ({ ...x }))
         const prev = state.annotationPast[state.annotationPast.length - 1]
         return {
           annotationPast: state.annotationPast.slice(0, -1),
@@ -1134,7 +1252,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       redoAnnotation: () => set(state => {
         if (state.annotationFuture.length === 0) return state
         const tab = state.tabs.find(t => t.id === state.activeTabId)
-        const current = tab?.annotations ? JSON.parse(JSON.stringify(tab.annotations)) as Annotation[] : []
+        const current = (tab?.annotations || []).map(x => ({ ...x }))
         const next = state.annotationFuture[0]
         return {
           annotationFuture: state.annotationFuture.slice(1),
@@ -1169,14 +1287,16 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       }),
       // Win+Tab switcher — snapshot MRU on open, pre-select next panel.
       openWinTabSwitcher: () => set(state => {
-        const mru = state.panelMruOrder.filter(id => state.panels[id] && state.panels[id].type !== 'region').slice(0, 20)
-        // Pre-select the NEXT panel (MRU[1]), not current. Fallback to MRU[0] if only 1.
-        const selected = mru.length > 1 ? mru[1] : mru[0] || null
+        const mru = state.panelMruOrder.filter(id => state.panels[id] && state.panels[id].type !== 'region')
+        const otherIds = Object.keys(state.panels).filter(id => state.panels[id].type !== 'region' && !mru.includes(id))
+        const allPanels = [...mru, ...otherIds].slice(0, 20)
+        // Pre-select the NEXT panel (allPanels[1]), not current. Fallback to allPanels[0] if only 1.
+        const selected = allPanels.length > 1 ? allPanels[1] : allPanels[0] || null
         return {
           winTabOpen: true,
           winTabCancelled: false,
           winTabSelectedPanelId: selected,
-          winTabSessionPanels: mru,
+          winTabSessionPanels: allPanels,
         }
       }),
       closeWinTabSwitcher: (commit) => set(() => {
@@ -1195,6 +1315,57 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         return state
       }),
       setCursorWorldPos: (x, y) => set({ cursorWorldPos: { x, y } }),
+
+      loadKeybindingsFromFile: async () => {
+        const api = window.electronAPI
+        if (!api?.file?.read || !api?.file?.write) return
+        try {
+          const home = await api.fs.home()
+          if (!home) return
+          const filePath = `${home}/.config/deck/keybindings.json`
+          const res = await api.file.read(filePath)
+          if (res.ok && res.content) {
+            const parsed = JSON.parse(res.content)
+            if (typeof parsed === 'object' && parsed !== null) {
+              if (parsed['fit-all'] === 'shift+f') parsed['fit-all'] = 'ctrl+1'
+              if (parsed['toggle-pin-front'] === 'ctrl+alt+p') parsed['toggle-pin-front'] = 'alt+p'
+              const merged = { ...DEFAULT_KEYBINDINGS, ...parsed }
+              set({ keybindings: merged })
+            }
+          } else {
+            await api.file.write(filePath, JSON.stringify(DEFAULT_KEYBINDINGS, null, 2))
+          }
+        } catch (e) {
+          console.error('Failed to load keybindings', e)
+        }
+      },
+      updateKeybinding: async (command: string, keyCombo: string) => {
+        const next = { ...get().keybindings, [command]: keyCombo }
+        set({ keybindings: next })
+        const api = window.electronAPI
+        if (!api?.file?.write) return
+        try {
+          const home = await api.fs.home()
+          if (!home) return
+          const filePath = `${home}/.config/deck/keybindings.json`
+          await api.file.write(filePath, JSON.stringify(next, null, 2))
+        } catch (e) {
+          console.error('Failed to save keybindings', e)
+        }
+      },
+      resetKeybindings: async () => {
+        set({ keybindings: DEFAULT_KEYBINDINGS })
+        const api = window.electronAPI
+        if (!api?.file?.write) return
+        try {
+          const home = await api.fs.home()
+          if (!home) return
+          const filePath = `${home}/.config/deck/keybindings.json`
+          await api.file.write(filePath, JSON.stringify(DEFAULT_KEYBINDINGS, null, 2))
+        } catch (e) {
+          console.error('Failed to reset keybindings', e)
+        }
+      },
 
       groupIntoRegion: (panelIds, regionName) => {
         const state = get()
@@ -1254,11 +1425,10 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           const p = panels[id]
           if (!p || p.type === 'region') return
           const cur = p.regionId
-          // Fully-inside test against all regions. If multiple, pick smallest (most specific).
+          // Partially-inside (overlap) test against all regions. If multiple, pick smallest (most specific).
           const candidates = regions.filter(r =>
-            p.x >= r.x && p.y >= r.y &&
-            p.x + p.width <= r.x + r.width &&
-            p.y + p.height <= r.y + r.height
+            p.x + p.width > r.x && p.x < r.x + r.width &&
+            p.y + p.height > r.y && p.y < r.y + r.height
           )
           candidates.sort((a, b) => (a.width * a.height) - (b.width * b.height))
           const target = candidates[0]
@@ -1540,6 +1710,36 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         return { canvasPresets: next }
       }),
 
+      renameCanvasPreset: (id, name) => set(state => {
+        const preset = state.canvasPresets[id]
+        if (!preset) return {}
+        return {
+          canvasPresets: {
+            ...state.canvasPresets,
+            [id]: { ...preset, name }
+          }
+        }
+      }),
+
+      saveViewportBookmark: (num) => {
+        const state = get()
+        set((s) => ({
+          viewportBookmarks: {
+            ...(s.viewportBookmarks || {}),
+            [num]: state.viewport
+          }
+        }))
+      },
+
+      loadViewportBookmark: (num) => {
+        const state = get()
+        const bookmark = state.viewportBookmarks?.[num]
+        if (bookmark) {
+          window.dispatchEvent(new CustomEvent('wts-smooth-viewport'))
+          set({ viewport: bookmark })
+        }
+      },
+
       findOrCreateScratchpad: () => {
         const state = get()
         const existing = state.tabs.find(t => t.kind === 'scratchpad')
@@ -1600,8 +1800,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           version: 1,
           exportedAt: Date.now(),
           tabs: state.tabs,
-          activeTabId: state.activeTabId,
-          theme: state.theme
+          activeTabId: state.activeTabId
         }, null, 2)
       },
 
@@ -1619,16 +1818,15 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           // Fall back to first tab if activeTabId points nowhere.
           const activeTabId = validTabs.find(t => t.id === data.activeTabId)?.id || validTabs[0].id
           const active = validTabs.find(t => t.id === activeTabId)!
-          set(state => ({
+          set({
             tabs: validTabs,
             activeTabId,
             panels: active.panels || {},
             selectedPanelIds: [],
             viewport: active.viewport || { x: 0, y: 0, zoom: 1 },
-            theme: ['dark', 'midnight', 'light', 'system'].includes(data.theme) ? data.theme : state.theme,
             past: [],
             future: []
-          }))
+          })
           return true
         } catch {
           return false
@@ -1673,7 +1871,6 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           outlinerOpen: state.outlinerOpen,
           statusBarVisible: state.statusBarVisible,
           chromeVisible: state.chromeVisible,
-          theme: state.theme,
           sidebarOpen: state.sidebarOpen,
           sidebarSection: state.sidebarSection,
           sidebarPin: state.sidebarPin,
@@ -1681,7 +1878,8 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           prefs: state.prefs,
           presetGraveyards: state.presetGraveyards,
           canvasPresets: state.canvasPresets,
-          annotationsVisible: state.annotationsVisible
+          annotationsVisible: state.annotationsVisible,
+          viewportBookmarks: state.viewportBookmarks
         }
       },
       // v2: scrub retired gold/amber colors. v3: force snapToGrid off. v4: add canvasPresets. v5: snapToGrid removed.
@@ -1704,6 +1902,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           })
         }
         if (data && !data.canvasPresets) data.canvasPresets = {}
+        if (data && !data.viewportBookmarks) data.viewportBookmarks = {}
         if (version < 5) {
           if (data.sidebarSection === 'tokens' || data.sidebarSection === 'notes') {
             data.sidebarSection = 'explorer'

@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { useWorkspaceStore } from '../store/workspaceStore'
 import { executeWorkspaceCommand } from '../workspaceCommands'
-import ThemeMenu from './ThemeMenu'
 import PresetsMenu from './PresetsMenu'
 import './StatusBar.css'
 
@@ -10,14 +9,14 @@ const StatusBar: React.FC = () => {
     panels,
     selectedPanelIds,
     viewport,
-    theme,
     statusBarVisible,
     toggleHelp,
-    loadPreset
+    loadPreset,
+    prefs
   } = useWorkspaceStore()
 
   const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null)
-  const [themeMenu, setThemeMenu] = useState<{ x: number; y: number } | null>(null)
+
   const [presetsMenu, setPresetsMenu] = useState<{ x: number; y: number } | null>(null)
 
   useEffect(() => {
@@ -85,27 +84,19 @@ const StatusBar: React.FC = () => {
         <button className="status-chip ghost" onClick={() => executeWorkspaceCommand('fit-all')}>fit</button>
         <button
           className="status-chip ghost"
-          onClick={(e) => {
-            const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
-            setThemeMenu({ x: r.left, y: r.top - 200 })
-          }}
-          title="Theme — click to choose"
-        >{theme}</button>
-        <button
-          className="status-chip ghost"
           onClick={() => useWorkspaceStore.getState().toggleStatusBar()}
           title="Hide status bar"
         >▾</button>
         <button className="status-chip ghost help" onClick={toggleHelp} title="Keyboard shortcuts (?)">?</button>
         <span className="status-sep" />
-        {cursor && (
+        {prefs.showCursorReadout && cursor && (
           <span className="status-item mono">
             {Math.round(cursor.x)}, {Math.round(cursor.y)}
           </span>
         )}
         <span className="status-item mono">{Math.round(viewport.zoom * 100)}%</span>
       </div>
-      {themeMenu && <ThemeMenu anchor={themeMenu} onClose={() => setThemeMenu(null)} />}
+
       {presetsMenu && <PresetsMenu anchor={presetsMenu} onClose={() => setPresetsMenu(null)} />}
     </div>
   )

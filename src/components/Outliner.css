@@ -151,11 +151,11 @@
 .outliner-row {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 5px 8px;
+  gap: var(--density-gap);
+  padding: var(--density-padding-y) var(--density-padding-x);
   border-radius: 5px;
   cursor: pointer;
-  font-size: 12.5px;
+  font-size: var(--density-font-size);
   color: rgba(255,255,255,0.78);
   position: relative;
 }

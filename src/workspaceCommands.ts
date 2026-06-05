@@ -39,11 +39,27 @@ export type WorkspaceCommand =
 // Last used layout strategy (persisted per session).
 let lastArrangeStrategy: LayoutStrategy = 'grid'
 
-const panelDefaults: Record<Panel['type'], Pick<Panel, 'width' | 'height' | 'title'> & { content?: string }> = {
+export const panelDefaults: Record<Panel['type'], Pick<Panel, 'width' | 'height' | 'title'> & { content?: string }> = {
   terminal: { width: 600, height: 400, title: 'Terminal' },
   editor: { width: 1100, height: 760, title: 'Editor' },
   browser: { width: 720, height: 560, title: 'Browser' },
   region: { width: 800, height: 600, title: 'Region' }
+}
+
+export const getPanelDefaults = (type: Panel['type']) => {
+  const store = useWorkspaceStore.getState()
+  const defaults = { ...panelDefaults[type] }
+  if (type === 'terminal') {
+    defaults.width = store.prefs.defaultPanelWidthTerminal ?? defaults.width
+    defaults.height = store.prefs.defaultPanelHeightTerminal ?? defaults.height
+  } else if (type === 'editor') {
+    defaults.width = store.prefs.defaultPanelWidthEditor ?? defaults.width
+    defaults.height = store.prefs.defaultPanelHeightEditor ?? defaults.height
+  } else if (type === 'browser') {
+    defaults.width = store.prefs.defaultPanelWidthBrowser ?? defaults.width
+    defaults.height = store.prefs.defaultPanelHeightBrowser ?? defaults.height
+  }
+  return defaults
 }
 
 const getSpawnPosition = (width: number, height: number) => {
@@ -56,7 +72,7 @@ const getSpawnPosition = (width: number, height: number) => {
 }
 
 export const createPanelAtViewportCenter = (type: Panel['type']) => {
-  const defaults = panelDefaults[type]
+  const defaults = getPanelDefaults(type)
   const position = getSpawnPosition(defaults.width, defaults.height)
   const id = `${type}-${Date.now()}`
 
@@ -72,14 +88,21 @@ export const createPanelAtViewportCenter = (type: Panel['type']) => {
   store.selectPanel(id)
 }
 
-export const getPanelBounds = (panels: Panel[]) => {
-  if (panels.length === 0) return null
-  const minX = Math.min(...panels.map(p => p.x))
-  const minY = Math.min(...panels.map(p => p.y))
-  const maxX = Math.max(...panels.map(p => p.x + p.width))
-  const maxY = Math.max(...panels.map(p => p.y + p.height))
+// Shared bounding-box computation used by both getPanelBounds and fitItemsToViewport.
+// Takes the minimal shape needed (x, y, width, height) so callers don't need a cast.
+const computeBounds = (items: ReadonlyArray<{ x: number; y: number; width: number; height: number }>) => {
+  if (items.length === 0) return null
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+  for (const p of items) {
+    if (p.x < minX) minX = p.x
+    if (p.y < minY) minY = p.y
+    if (p.x + p.width > maxX) maxX = p.x + p.width
+    if (p.y + p.height > maxY) maxY = p.y + p.height
+  }
   return { x: minX, y: minY, width: maxX - minX, height: maxY - minY }
 }
+
+export const getPanelBounds = (panels: Panel[]) => computeBounds(panels)
 
 export const flagSmoothViewport = () => {
   window.dispatchEvent(new CustomEvent('wts-smooth-viewport'))
@@ -87,7 +110,7 @@ export const flagSmoothViewport = () => {
 
 export const fitPanelsToViewport = (panels: Panel[]) => {
   flagSmoothViewport()
-  const bounds = getPanelBounds(panels)
+  const bounds = computeBounds(panels)
   const store = useWorkspaceStore.getState()
   if (!bounds) {
     store.setViewport({ x: 0, y: 0, zoom: 1 })
@@ -109,12 +132,8 @@ export const fitPanelsToViewport = (panels: Panel[]) => {
 
 export const fitItemsToViewport = (items: Array<{ x: number; y: number; width: number; height: number }>) => {
   flagSmoothViewport()
-  if (items.length === 0) return
-  const minX = Math.min(...items.map(i => i.x))
-  const minY = Math.min(...items.map(i => i.y))
-  const maxX = Math.max(...items.map(i => i.x + i.width))
-  const maxY = Math.max(...items.map(i => i.y + i.height))
-  const bounds = { x: minX, y: minY, width: maxX - minX, height: maxY - minY }
+  const bounds = computeBounds(items)
+  if (!bounds) return
 
   const padding = 96
   const store = useWorkspaceStore.getState()

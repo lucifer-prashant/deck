@@ -38,12 +38,14 @@ interface BrowserTab {
   zoom?: number
 }
 
-const DEFAULT_HOME = 'https://www.google.com'
+const getBrowserHomeUrl = (): string => {
+  return useWorkspaceStore.getState().prefs?.browserHomeUrl || 'https://www.google.com'
+}
 const CLOSED_STACK_LIMIT = 10
 
 const normalizeUrl = (input: string): string => {
   const trimmed = input.trim()
-  if (!trimmed) return DEFAULT_HOME
+  if (!trimmed) return getBrowserHomeUrl()
   // Already has a protocol — use as-is.
   if (/^[a-z][a-z0-9+\-.]*:/i.test(trimmed)) return trimmed
   // Looks like a domain (e.g. github.com, example.com/path).
@@ -54,7 +56,7 @@ const normalizeUrl = (input: string): string => {
   return `https://${trimmed}`
 }
 
-const makeTab = (url = DEFAULT_HOME, incognito = false): BrowserTab => ({
+const makeTab = (url = getBrowserHomeUrl(), incognito = false): BrowserTab => ({
   id: `bt-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
   url,
   title: incognito ? 'Incognito' : 'New tab',
@@ -99,9 +101,10 @@ interface PanelSettings {
 }
 
 const BrowserPanel: React.FC<Props> = ({ panel }) => {
-  const updatePanel = useWorkspaceStore(s => s.updatePanel)
+  const { updatePanel, prefs } = useWorkspaceStore()
   const settings = panel.settings as PanelSettings | undefined
   const browserCommand = settings?.browserCommand
+  const isLazyLoad = settings?.lazyLoad !== undefined ? settings.lazyLoad : (prefs.browserLazyLoad ?? false)
 
   const [tabs, setTabs] = useState<BrowserTab[]>(() => {
     if (settings?.browserTabs && settings.browserTabs.length > 0) return settings.browserTabs
@@ -170,7 +173,7 @@ const BrowserPanel: React.FC<Props> = ({ panel }) => {
   }, [activeTab?.title, panel.id, panel.description, updatePanel, activeTab])
 
   // --- Tab operations ---
-  const addTab = useCallback((url = DEFAULT_HOME, incognito = false, activate = true) => {
+  const addTab = useCallback((url = getBrowserHomeUrl(), incognito = false, activate = true) => {
     const t = makeTab(url, incognito)
     setTabs(ts => [...ts, t])
     if (activate) {
@@ -287,7 +290,7 @@ const BrowserPanel: React.FC<Props> = ({ panel }) => {
   const runShortcut = useCallback((name: string, n?: number) => {
     switch (name) {
       case 'new-tab': addTab(); break
-      case 'new-incognito': addTab(DEFAULT_HOME, true); break
+      case 'new-incognito': addTab(getBrowserHomeUrl(), true); break
       case 'reopen-closed': reopenClosed(); break
       case 'close-tab': closeTab(activeIdRef.current); break
       case 'focus-url': focusUrl(); break
@@ -518,7 +521,7 @@ const BrowserPanel: React.FC<Props> = ({ panel }) => {
           </div>
         ))}
         <button className="bp-newtab" onClick={() => addTab()} title="New tab (Ctrl+T)">+</button>
-        <button className="bp-newtab incog" onClick={() => addTab(DEFAULT_HOME, true)} title="New incognito tab (Ctrl+Shift+N)">⎈</button>
+        <button className="bp-newtab incog" onClick={() => addTab(getBrowserHomeUrl(), true)} title="New incognito tab (Ctrl+Shift+N)">⎈</button>
       </div>
       <div className="browser-toolbar" style={{ display: settings?.kiosk ? 'none' : undefined }}>
         <button className="bp-btn" onClick={back} disabled={!activeNav.canBack} title="Back (Alt+←)">‹</button>
@@ -617,7 +620,7 @@ const BrowserPanel: React.FC<Props> = ({ panel }) => {
       <div className="bp-viewport">
         {preloadPath === null ? (
           <div className="bp-loading">Loading browser…</div>
-        ) : settings?.lazyLoad ? (
+        ) : isLazyLoad ? (
           <LazyLoadPlaceholder
             title={panel.title}
             color={panel.color}

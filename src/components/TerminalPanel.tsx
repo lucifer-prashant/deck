@@ -49,9 +49,10 @@ const TerminalPanel: React.FC<Props> = ({ panel }) => {
 
   useEffect(() => {
     if (!containerRef.current) return
-    const initialFontSize = (panel.settings?.fontSize as number | undefined) ?? 15
+    const prefs = useWorkspaceStore.getState().prefs
+    const initialFontSize = (panel.settings?.fontSize as number | undefined) ?? prefs.terminalFontSize ?? 15
     const term = new Terminal({
-      fontFamily: "'JetBrainsMono Nerd Font', 'JetBrains Mono', 'Fira Code', 'SF Mono', 'Cascadia Code', Menlo, monospace",
+      fontFamily: prefs.terminalFontFamily || "'JetBrainsMono Nerd Font', 'JetBrains Mono', 'Fira Code', 'SF Mono', 'Cascadia Code', Menlo, monospace",
       fontSize: initialFontSize,
       fontWeight: '400',
       fontWeightBold: '600',
@@ -61,7 +62,7 @@ const TerminalPanel: React.FC<Props> = ({ panel }) => {
       cursorStyle: 'block',
       allowProposedApi: true,
       allowTransparency: false,
-      scrollback: 10000,
+      scrollback: prefs.terminalScrollback ?? 10000,
       smoothScrollDuration: 80,
       drawBoldTextInBrightColors: true,
       minimumContrastRatio: 1,
@@ -132,7 +133,8 @@ const TerminalPanel: React.FC<Props> = ({ panel }) => {
       if (!spawnedRef.current) {
         spawnedRef.current = true
         const cwd = (panel.settings?.cwd as string | undefined) || undefined
-        api.spawn({ panelId: panel.id, cwd, cols, rows }).catch(err => {
+        const shell = prefs.defaultTerminalShell || undefined
+        api.spawn({ panelId: panel.id, cwd, cols, rows, shell }).catch(err => {
           term.writeln(`\x1b[31m[spawn failed: ${String(err)}]\x1b[0m`)
         })
       }
