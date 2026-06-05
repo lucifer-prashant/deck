@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState, useRef } from 'react'
 import { useWorkspaceStore, type Panel } from '../store/workspaceStore'
 import { executeWorkspaceCommand } from '../workspaceCommands'
 import './PanelSwitcher.css'
@@ -16,6 +16,18 @@ const PanelSwitcher: React.FC = () => {
   const setPanelSwitcherOpen = useWorkspaceStore(s => s.setPanelSwitcherOpen)
   const selectPanel = useWorkspaceStore(s => s.selectPanel)
   const [highlightedIdx, setHighlightedIdx] = useState(0)
+
+  const previousActiveElement = useRef<HTMLElement | null>(null)
+
+  useEffect(() => {
+    if (panelSwitcherOpen) {
+      previousActiveElement.current = document.activeElement as HTMLElement | null
+    } else {
+      if (previousActiveElement.current && document.body.contains(previousActiveElement.current)) {
+        previousActiveElement.current.focus()
+      }
+    }
+  }, [panelSwitcherOpen])
 
   // All panels on the active canvas (no regions), sorted by position.
   const allPanels = useMemo(

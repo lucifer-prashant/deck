@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react'
+import React, { useEffect, useRef } from 'react'
 import { useWorkspaceStore } from '../store/workspaceStore'
 import './HelpOverlay.css'
 
@@ -81,6 +81,17 @@ const GithubIcon = () => (
 
 const HelpOverlay: React.FC = () => {
   const { helpOpen, toggleHelp } = useWorkspaceStore()
+  const previousActiveElement = useRef<HTMLElement | null>(null)
+
+  useEffect(() => {
+    if (helpOpen) {
+      previousActiveElement.current = document.activeElement as HTMLElement | null
+    } else {
+      if (previousActiveElement.current && document.body.contains(previousActiveElement.current)) {
+        previousActiveElement.current.focus()
+      }
+    }
+  }, [helpOpen])
 
   useEffect(() => {
     if (!helpOpen) return

@@ -12,6 +12,7 @@ interface SearchResult {
 
 const PanelFinder: React.FC = () => {
   const inputRef = useRef<HTMLInputElement>(null)
+  const previousActiveElement = useRef<HTMLElement | null>(null)
   const panels = useWorkspaceStore(s => s.panels)
   const panelFinderOpen = useWorkspaceStore(s => s.panelFinderOpen)
   const setPanelFinderOpen = useWorkspaceStore(s => s.setPanelFinderOpen)
@@ -72,7 +73,12 @@ const PanelFinder: React.FC = () => {
 
   useEffect(() => {
     if (panelFinderOpen) {
+      previousActiveElement.current = document.activeElement as HTMLElement | null
       requestAnimationFrame(() => inputRef.current?.focus())
+    } else {
+      if (previousActiveElement.current && document.body.contains(previousActiveElement.current)) {
+        previousActiveElement.current.focus()
+      }
     }
   }, [panelFinderOpen])
 

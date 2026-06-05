@@ -1,10 +1,54 @@
 import { app, BrowserWindow, Menu, ipcMain, dialog, shell, session, protocol } from 'electron'
 import { join, basename, dirname } from 'path'
 import { homedir } from 'os'
-import { promises as fsp, existsSync } from 'fs'
+import { promises as fsp, existsSync, readFileSync, writeFileSync } from 'fs'
 import { spawn, ChildProcess } from 'child_process'
 import * as net from 'net'
 import * as pty from 'node-pty'
+import * as crypto from 'crypto'
+
+// ─── Single Instance Lock ───────────────────────────────────────────────────
+const gotTheLock = app.requestSingleInstanceLock()
+if (!gotTheLock) {
+  app.quit()
+  process.exit(0)
+} else {
+  app.on('second-instance', () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore()
+      mainWindow.focus()
+    }
+  })
+}
+
+// ─── Window State Persistence ────────────────────────────────────────────────
+interface WindowState {
+  width: number
+  height: number
+  x?: number
+  y?: number
+  isMaximized?: boolean
+}
+
+const getWindowStatePath = () => join(app.getPath('userData'), 'window-state.json')
+
+const loadWindowState = (): WindowState => {
+  const defaultState = { width: 1400, height: 900 }
+  try {
+    const path = getWindowStatePath()
+    if (existsSync(path)) {
+      const data = JSON.parse(readFileSync(path, 'utf8'))
+      return { ...defaultState, ...data }
+    }
+  } catch { /* ignore */ }
+  return defaultState
+}
+
+const saveWindowState = (state: WindowState) => {
+  try {
+    writeFileSync(getWindowStatePath(), JSON.stringify(state), 'utf8')
+  } catch { /* ignore */ }
+}
 
 // ─── Platform helpers ────────────────────────────────────────────────────────
 // IS_WIN / PATH_SEP are used throughout to gate Windows-specific behaviour.
@@ -59,6 +103,7 @@ const broadcast = (channel: string, payload: unknown) => {
 }
 
 const isDev = !app.isPackaged
+const enableDevTools = isDev || process.env.DECK_DEVTOOLS === '1'
 
 function buildMenu() {
   const send = (command: string) => {
@@ -172,9 +217,12 @@ function buildMenu() {
 buildMenu()
 
 function createWindow() {
+  const state = loadWindowState()
   mainWindow = new BrowserWindow({
-    width: 1400,
-    height: 900,
+    width: state.width,
+    height: state.height,
+    x: state.x,
+    y: state.y,
     minWidth: 800,
     minHeight: 600,
     show: false,
@@ -183,13 +231,35 @@ function createWindow() {
       preload: join(__dirname, 'preload.js'),
       nodeIntegration: false,
       contextIsolation: true,
-      devTools: true,
+      devTools: enableDevTools,
       webviewTag: true
     },
     frame: true,
     title: 'Deck',
     icon: join(__dirname, '../build/icons/512x512.png')
   })
+
+  if (state.isMaximized) {
+    mainWindow.maximize()
+  }
+
+  const updateState = () => {
+    if (!mainWindow) return
+    try {
+      const bounds = mainWindow.getBounds()
+      const isMax = mainWindow.isMaximized()
+      saveWindowState({
+        width: bounds.width,
+        height: bounds.height,
+        x: bounds.x,
+        y: bounds.y,
+        isMaximized: isMax
+      })
+    } catch { /* ignore */ }
+  }
+
+  mainWindow.on('resize', updateState)
+  mainWindow.on('move', updateState)
 
   if (isDev) {
     mainWindow.loadURL('http://localhost:5173')
@@ -353,6 +423,14 @@ app.whenReady().then(async () => {
       const img = nativeImage.createFromPath(join(__dirname, '../build/icons/512x512.png'))
       if (!img.isEmpty()) app.setIcon(img)
     } catch { /* non-fatal — icon just won't show */ }
+
+    // Clean up old AppImage if we recently updated
+    if (process.env.APPIMAGE) {
+      const oldPath = process.env.APPIMAGE + '.old'
+      if (existsSync(oldPath)) {
+        fsp.unlink(oldPath).catch(() => {})
+      }
+    }
   }
   createWindow()
 })
@@ -760,7 +838,7 @@ const createPopoutWindow = (panelId: string) => {
       preload: join(__dirname, 'preload.js'),
       nodeIntegration: false,
       contextIsolation: true,
-      devTools: true,
+      devTools: enableDevTools,
       webviewTag: true
     },
     title: 'Deck — Panel',
@@ -849,21 +927,36 @@ ipcMain.handle('git:pick-worktree-dir', async (_e, defaultDir?: string) => {
 })
 
 ipcMain.handle('git:fetch', async (_e, repoRoot: string) => {
-  const r = await runGit(repoRoot, ['fetch', '--all', '--prune'], 30000)
-  return { ok: r.ok, error: r.ok ? undefined : r.stderr.trim() }
+  mainWindow?.setProgressBar(2)
+  try {
+    const r = await runGit(repoRoot, ['fetch', '--all', '--prune'], 30000)
+    return { ok: r.ok, error: r.ok ? undefined : r.stderr.trim() }
+  } finally {
+    mainWindow?.setProgressBar(-1)
+  }
 })
 
 ipcMain.handle('git:pull', async (_e, repoRoot: string) => {
-  const r = await runGit(repoRoot, ['pull', '--ff-only'], 60000)
-  return { ok: r.ok, error: r.ok ? undefined : (r.stderr.trim() || r.stdout.trim()), output: r.stdout.trim() }
+  mainWindow?.setProgressBar(2)
+  try {
+    const r = await runGit(repoRoot, ['pull', '--ff-only'], 60000)
+    return { ok: r.ok, error: r.ok ? undefined : (r.stderr.trim() || r.stdout.trim()), output: r.stdout.trim() }
+  } finally {
+    mainWindow?.setProgressBar(-1)
+  }
 })
 
 ipcMain.handle('git:push', async (_e, args: { repoRoot: string; setUpstream?: boolean }) => {
-  const gitArgs = args.setUpstream
-    ? ['push', '-u', 'origin', 'HEAD']
-    : ['push']
-  const r = await runGit(args.repoRoot, gitArgs, 60000)
-  return { ok: r.ok, error: r.ok ? undefined : (r.stderr.trim() || r.stdout.trim()), output: r.stdout.trim() }
+  mainWindow?.setProgressBar(2)
+  try {
+    const gitArgs = args.setUpstream
+      ? ['push', '-u', 'origin', 'HEAD']
+      : ['push']
+    const r = await runGit(args.repoRoot, gitArgs, 60000)
+    return { ok: r.ok, error: r.ok ? undefined : (r.stderr.trim() || r.stdout.trim()), output: r.stdout.trim() }
+  } finally {
+    mainWindow?.setProgressBar(-1)
+  }
 })
 
 ipcMain.handle('git:checkout', async (_e, args: { repoRoot: string; branch: string; create?: boolean }) => {
@@ -1058,6 +1151,9 @@ const startCodeServer = async (): Promise<{ ok: boolean; port?: number; url?: st
   if (codeServerStarting) return codeServerStarting
   const bin = findCodeServerBin()
   if (!bin) return { ok: false, error: 'code-server binary not found. Install with: curl -fsSL https://code-server.dev/install.sh | sh' }
+  
+  mainWindow?.setProgressBar(2) // Set indeterminate progress on taskbar
+
   codeServerStarting = (async () => {
     try {
       const userDataDir = join(app.getPath('userData'), 'code-server-data')
@@ -1082,15 +1178,17 @@ const startCodeServer = async (): Promise<{ ok: boolean; port?: number; url?: st
       // Stable port across restarts — cookies and OAuth callbacks are tied to origin,
       // so a random port every launch wipes login sessions.
       const port = await getStablePort(userDataDir)
+      
+      const password = crypto.randomBytes(24).toString('hex')
       const args = [
         '--bind-addr', `127.0.0.1:${port}`,
-        '--auth', 'none',
+        '--auth', 'password',
         '--disable-telemetry',
         '--disable-update-check',
         '--user-data-dir', userDataDir,
         '--extensions-dir', extDir
       ]
-      const proc = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env } })
+      const proc = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PASSWORD: password } })
       codeServerProc = proc
       // Log code-server output verbosely while we're debugging IDE issues (profile
       // create / wheel zoom etc). Filter only the most repetitive lines.
@@ -1115,12 +1213,24 @@ const startCodeServer = async (): Promise<{ ok: boolean; port?: number; url?: st
         codeServerProc = null
         return { ok: false, error: 'code-server failed to start within 20s' }
       }
+
+      // Inject the authentication cookie into the partition's session so the webview bypasses the password screen
+      const csSession = session.fromPartition('persist:wts-code-server')
+      await csSession.cookies.set({
+        url: `http://127.0.0.1:${port}`,
+        name: 'key',
+        value: password,
+        domain: '127.0.0.1',
+        path: '/'
+      })
+
       codeServerPort = port
       return { ok: true, port, url: `http://127.0.0.1:${port}` }
     } catch (err) {
       return { ok: false, error: (err as Error).message }
     } finally {
       codeServerStarting = null
+      mainWindow?.setProgressBar(-1) // Clear taskbar progress
     }
   })()
   return codeServerStarting
@@ -1149,6 +1259,115 @@ app.on('before-quit', () => {
     try { codeServerProc.kill() } catch { /* ignore */ }
     codeServerProc = null
     codeServerPort = null
+  }
+})
+
+// ─── Auto-Updater Helpers & Handler ──────────────────────────────────────────
+import * as https from 'https'
+import { createWriteStream } from 'fs'
+
+function downloadFile(url: string, destPath: string, onProgress: (percent: number) => void): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const file = createWriteStream(destPath)
+    
+    const requestUrl = (targetUrl: string) => {
+      https.get(targetUrl, {
+        headers: { 'User-Agent': 'Deck-Updater' }
+      }, (res) => {
+        if (res.statusCode === 301 || res.statusCode === 302) {
+          requestUrl(res.headers.location!)
+          return
+        }
+        
+        if (res.statusCode !== 200) {
+          file.close()
+          reject(new Error(`Server returned HTTP ${res.statusCode}`))
+          return
+        }
+        
+        const totalSize = parseInt(res.headers['content-length'] || '0', 10)
+        let downloaded = 0
+        
+        res.on('data', (chunk) => {
+          downloaded += chunk.length
+          if (totalSize > 0) {
+            onProgress(downloaded / totalSize)
+          }
+        })
+        
+        res.pipe(file)
+        
+        file.on('finish', () => {
+          file.close()
+          resolve()
+        })
+      }).on('error', (err) => {
+        file.close()
+        reject(err)
+      })
+    }
+    
+    requestUrl(url)
+  })
+}
+
+ipcMain.handle('app:trigger-update', async (_e, { url, filename }) => {
+  if (!mainWindow) return { ok: false, error: 'No active window' }
+  
+  mainWindow.setProgressBar(0)
+  
+  const onProgress = (percent: number) => {
+    mainWindow?.setProgressBar(percent)
+    mainWindow?.webContents.send('app:update-progress', percent)
+  }
+  
+  try {
+    if (IS_WIN) {
+      const tempPath = join(app.getPath('temp'), filename)
+      await downloadFile(url, tempPath, onProgress)
+      
+      // Spawn installer detached and exit app
+      const child = spawn(tempPath, [], { detached: true, stdio: 'ignore' })
+      child.unref()
+      app.quit()
+      return { ok: true }
+    } else if (process.platform === 'linux' && process.env.APPIMAGE) {
+      const activePath = process.env.APPIMAGE
+      const tempPath = join(dirname(activePath), 'Deck-Update.AppImage')
+      
+      await downloadFile(url, tempPath, onProgress)
+      
+      // Make it executable
+      await fsp.chmod(tempPath, 0o755)
+      
+      // Rename current to current.old
+      const oldPath = activePath + '.old'
+      if (existsSync(oldPath)) {
+        try { await fsp.unlink(oldPath) } catch {}
+      }
+      await fsp.rename(activePath, oldPath)
+      
+      // Rename temp to current
+      await fsp.rename(tempPath, activePath)
+      
+      // Relaunch the new AppImage
+      const child = spawn(activePath, [], { detached: true, stdio: 'ignore' })
+      child.unref()
+      app.quit()
+      return { ok: true }
+    } else {
+      // General download for dev / package manager installs
+      const destPath = join(app.getPath('downloads'), filename)
+      await downloadFile(url, destPath, onProgress)
+      
+      // Show file in file manager
+      shell.showItemInFolder(destPath)
+      return { ok: true, downloadedTo: destPath }
+    }
+  } catch (err) {
+    console.error('Update failed:', err)
+    mainWindow.setProgressBar(-1)
+    return { ok: false, error: err instanceof Error ? err.message : String(err) }
   }
 })
 

@@ -597,12 +597,12 @@ button,
 
 .align-guide.v {
 	width: 0;
-	border-left: 1px dashed #ff66cc;
+	border-left: 1px dashed var(--align-guide-color, #ff66cc);
 }
 
 .align-guide.h {
 	height: 0;
-	border-top: 1px dashed #ff66cc;
+	border-top: 1px dashed var(--align-guide-color, #ff66cc);
 }
 
 button:focus-visible,
@@ -727,5 +727,87 @@ button:focus-visible,
 
 .swatch-item:hover .delete-swatch-btn {
 	opacity: 1 !important;
+}
+
+/* Update Banner */
+.update-banner {
+	position: fixed;
+	top: 50px;
+	left: 50%;
+	transform: translateX(-50%);
+	z-index: 12000;
+	background: rgba(37, 99, 235, 0.16);
+	backdrop-filter: blur(12px);
+	-webkit-backdrop-filter: blur(12px);
+	border: 1px solid rgba(37, 99, 235, 0.35);
+	box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35), 0 0 15px rgba(37, 99, 235, 0.15);
+	border-radius: 8px;
+	padding: 10px 16px;
+	max-width: 600px;
+	width: calc(100% - 32px);
+	animation: slide-down-banner 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes slide-down-banner {
+	from { transform: translate(-50%, -15px); opacity: 0; }
+	to { transform: translate(-50%, 0); opacity: 1; }
+}
+
+.update-banner-content {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+.update-banner-text {
+	font-size: 12.5px;
+	color: var(--fg, #e6e8ec);
+	line-height: 1.4;
+}
+
+.update-banner-progress-bg {
+	height: 4px;
+	background: rgba(255, 255, 255, 0.1);
+	border-radius: 2px;
+	overflow: hidden;
+}
+
+.update-banner-progress-bar {
+	height: 100%;
+	background: #4dabe8;
+	transition: width 0.1s ease;
+}
+
+.update-banner-actions {
+	display: flex;
+	gap: 8px;
+	justify-content: flex-end;
+}
+
+.update-btn {
+	background: #2563eb;
+	color: #fff;
+	border: none;
+	border-radius: 5px;
+	padding: 5px 12px;
+	font-size: 11.5px;
+	font-weight: 600;
+	cursor: pointer;
+	transition: background 0.12s ease;
+}
+
+.update-btn:hover {
+	background: #1d4ed8;
+}
+
+.update-btn.dismiss {
+	background: rgba(255, 255, 255, 0.08);
+	color: var(--fg-muted, #bfc4cb);
+	border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.update-btn.dismiss:hover {
+	background: rgba(255, 255, 255, 0.16);
+	color: #fff;
 }
 

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react"
+import React, { useEffect, useState, useRef } from "react"
 import { createPortal } from "react-dom"
 import { useWorkspaceStore, CanvasPreset } from "../store/workspaceStore"
 import { serializeKeyEvent } from "../App"
@@ -146,6 +146,18 @@ const SettingsPane: React.FC = () => {
 	const [shortcutSearch, setShortcutSearch] = useState("")
 	// Current OS platform — used for platform-specific UI copy (e.g. shell path hints).
 	const [platform, setPlatform] = useState<string>('')
+
+	const previousActiveElement = useRef<HTMLElement | null>(null)
+
+	useEffect(() => {
+		if (open) {
+			previousActiveElement.current = document.activeElement as HTMLElement | null
+		} else {
+			if (previousActiveElement.current && document.body.contains(previousActiveElement.current)) {
+				previousActiveElement.current.focus()
+			}
+		}
+	}, [open])
 
 	useEffect(() => {
 		window.electronAPI?.getPlatform().then(setPlatform).catch(() => {})

@@ -78,6 +78,80 @@ function MainAppShell() {
     prefs,
   } = useWorkspaceStore()
 
+  const [updateAvailable, setUpdateAvailable] = React.useState<{ version: string; url: string; filename: string } | null>(null)
+  const [updateProgress, setUpdateProgress] = React.useState<number | null>(null)
+  const [updateStatus, setUpdateStatus] = React.useState<string>('')
+  const [dismissedUpdate, setDismissedUpdate] = React.useState(false)
+
+  // Check for updates on mount
+  useEffect(() => {
+    if (!window.electronAPI) return
+    const checkForUpdates = async () => {
+      try {
+        const currentVersion = await window.electronAPI.getAppVersion()
+        const response = await fetch('https://api.github.com/repos/lucifer-prashant/deck/releases/latest')
+        if (!response.ok) return
+        const data = await response.json()
+        const latestVersion = data.tag_name ? data.tag_name.replace(/^v/, '') : ''
+        
+        if (latestVersion && latestVersion !== currentVersion) {
+          const platform = await window.electronAPI.getPlatform()
+          let asset = null
+          if (platform === 'win32') {
+            asset = data.assets.find((a: any) => a.name.endsWith('.exe') && a.name.includes('Setup')) ||
+                    data.assets.find((a: any) => a.name.endsWith('.exe'))
+          } else if (platform === 'linux') {
+            asset = data.assets.find((a: any) => a.name.endsWith('.AppImage')) ||
+                    data.assets.find((a: any) => a.name.endsWith('.deb')) ||
+                    data.assets.find((a: any) => a.name.endsWith('.rpm'))
+          }
+          if (asset) {
+            setUpdateAvailable({
+              version: latestVersion,
+              url: asset.browser_download_url,
+              filename: asset.name
+            })
+          }
+        }
+      } catch (err) {
+        console.error('Update check failed:', err)
+      }
+    }
+    checkForUpdates()
+  }, [])
+
+  // Listen for update download progress
+  useEffect(() => {
+    if (!window.electronAPI?.onUpdateProgress) return
+    const unsub = window.electronAPI.onUpdateProgress((percent) => {
+      setUpdateProgress(percent)
+    })
+    return () => unsub()
+  }, [])
+
+  const startUpdate = async () => {
+    if (!updateAvailable || !window.electronAPI) return
+    setUpdateStatus('Downloading...')
+    setUpdateProgress(0)
+    try {
+      const res = await window.electronAPI.triggerUpdate(updateAvailable.url, updateAvailable.filename)
+      if (!res.ok) {
+        setUpdateStatus(`Failed: ${res.error}`)
+        setUpdateProgress(null)
+      } else {
+        if (res.downloadedTo) {
+          setUpdateStatus(`Downloaded! Open the file in your Downloads folder to install.`)
+          setUpdateProgress(null)
+        } else {
+          setUpdateStatus('Restarting to install update...')
+        }
+      }
+    } catch (err) {
+      setUpdateStatus('Error occurred during update.')
+      setUpdateProgress(null)
+    }
+  }
+
   useEffect(() => { initialize() }, [initialize])
 
   // Handle main-process "Save & Close" request: auto-save then force-close.
@@ -175,6 +249,7 @@ function MainAppShell() {
         root.style.setProperty('--modal-bg', 'rgba(255, 255, 255, 0.98)')
         root.style.setProperty('--modal-border', 'rgba(0, 0, 0, 0.08)')
         root.style.setProperty('--input-bg', '#ffffff')
+        root.style.setProperty('--align-guide-color', '#ff3366')
         root.setAttribute('data-theme', 'light')
       } else {
         root.style.setProperty('--fg', '#e6e8ec')
@@ -225,6 +300,7 @@ function MainAppShell() {
         root.style.setProperty('--modal-bg', `rgba(${mr}, ${mg}, ${mb}, 0.98)`)
         root.style.setProperty('--modal-border', `rgba(${lighten(r, 0.25)}, ${lighten(g, 0.25)}, ${lighten(b, 0.25)}, 0.15)`)
         root.style.setProperty('--input-bg', 'rgba(0, 0, 0, 0.28)')
+        root.style.setProperty('--align-guide-color', '#ff66cc')
         root.setAttribute('data-theme', 'dark')
       }
     }
@@ -823,6 +899,33 @@ function MainAppShell() {
 
   return (
     <div className="app">
+      {updateAvailable && !dismissedUpdate && (
+        <div className="update-banner">
+          <div className="update-banner-content">
+            <span className="update-banner-text">
+              🚀 A new version of Deck is available: <strong>v{updateAvailable.version}</strong>
+              {updateStatus ? ` — ${updateStatus}` : ''}
+              {updateProgress !== null && ` (${Math.round(updateProgress * 100)}%)`}
+            </span>
+            {updateProgress !== null && (
+              <div className="update-banner-progress-bg">
+                <div className="update-banner-progress-bar" style={{ width: `${updateProgress * 100}%` }} />
+              </div>
+            )}
+            <div className="update-banner-actions">
+              {!updateStatus && (
+                <>
+                  <button className="update-btn" onClick={startUpdate}>Update Now</button>
+                  <button className="update-btn dismiss" onClick={() => setDismissedUpdate(true)}>Dismiss</button>
+                </>
+              )}
+              {updateStatus.includes('Downloaded!') && (
+                <button className="update-btn dismiss" onClick={() => setDismissedUpdate(true)}>OK</button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
       {chromeVisible && <WorkspaceChrome />}
       {!chromeVisible && (
         <button

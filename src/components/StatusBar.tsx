@@ -12,7 +12,10 @@ const StatusBar: React.FC = () => {
     statusBarVisible,
     toggleHelp,
     loadPreset,
-    prefs
+    prefs,
+    viewportBookmarks,
+    saveViewportBookmark,
+    loadViewportBookmark
   } = useWorkspaceStore()
 
   const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null)
@@ -79,6 +82,36 @@ const StatusBar: React.FC = () => {
         >⊕ presets</button>
         <span className="status-sep" />
         <span className="status-item summary">{summary}</span>
+        <span className="status-sep" />
+        <div className="status-bookmarks" title="Viewport Bookmarks (Alt+1-9 to jump, Ctrl+Alt+1-9 to set)">
+          <span className="bookmarks-label">Bookmarks:</span>
+          {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => {
+            const isSet = !!(viewportBookmarks && viewportBookmarks[num])
+            return (
+              <button
+                key={num}
+                className={`bookmark-btn ${isSet ? 'is-set' : ''}`}
+                onClick={() => {
+                  if (isSet) {
+                    loadViewportBookmark(num)
+                  } else {
+                    saveViewportBookmark(num)
+                  }
+                }}
+                onContextMenu={(e) => {
+                  e.preventDefault()
+                  saveViewportBookmark(num)
+                }}
+                title={isSet 
+                  ? `Jump to Bookmark ${num} (Alt+${num})\nRight-click to overwrite` 
+                  : `Save current viewport to Bookmark ${num} (Ctrl+Alt+${num})`
+                }
+              >
+                {num}
+              </button>
+            )
+          })}
+        </div>
       </div>
       <div className="status-right">
         <button className="status-chip ghost" onClick={() => executeWorkspaceCommand('fit-all')}>fit</button>

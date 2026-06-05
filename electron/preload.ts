@@ -119,6 +119,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.on('codeserver:exit', l)
       return () => ipcRenderer.removeListener('codeserver:exit', l)
     }
+  },
+  triggerUpdate: (url: string, filename: string) => ipcRenderer.invoke('app:trigger-update', { url, filename }),
+  onUpdateProgress: (cb: (percent: number) => void) => {
+    const l = (_event: Electron.IpcRendererEvent, percent: number) => cb(percent)
+    ipcRenderer.on('app:update-progress', l)
+    return () => ipcRenderer.removeListener('app:update-progress', l)
   }
 })
 
@@ -202,6 +208,8 @@ declare global {
         stop: () => Promise<{ ok: boolean }>
         onExit: (cb: (info: { code: number | null; signal: NodeJS.Signals | null }) => void) => () => void
       }
+      triggerUpdate: (url: string, filename: string) => Promise<{ ok: boolean; error?: string; downloadedTo?: string }>
+      onUpdateProgress: (cb: (percent: number) => void) => () => void
     }
   }
 }

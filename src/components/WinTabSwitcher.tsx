@@ -36,6 +36,18 @@ const WinTabSwitcher: React.FC = () => {
   const { winTabOpen, winTabSelectedPanelId, winTabSessionPanels, panels, activeTabId } = useWorkspaceStore()
   const [mouseActive, setMouseActive] = useState(false)
   const initialMousePos = useRef<{ x: number; y: number } | null>(null)
+  const previousActiveElement = useRef<HTMLElement | null>(null)
+
+  useEffect(() => {
+    if (winTabOpen) {
+      previousActiveElement.current = document.activeElement as HTMLElement | null
+    } else {
+      if (previousActiveElement.current && document.body.contains(previousActiveElement.current)) {
+        previousActiveElement.current.focus()
+      }
+    }
+  }, [winTabOpen])
+
   const closeWinTabSwitcher = useWorkspaceStore(s => s.closeWinTabSwitcher)
   const cycleWinTabSelection = useWorkspaceStore(s => s.cycleWinTabSelection)
   const selectWinTabPanel = useWorkspaceStore(s => s.selectWinTabPanel)

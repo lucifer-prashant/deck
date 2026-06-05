@@ -26,7 +26,8 @@ const Minimap: React.FC = () => {
     viewport,
     setViewport,
     selectPanel,
-    toggleMinimap
+    toggleMinimap,
+    viewportBookmarks
   } = useWorkspaceStore()
 
   const [pos, setPos] = useState(() => {
@@ -245,6 +246,29 @@ const Minimap: React.FC = () => {
                 onClick={(e) => { e.stopPropagation(); selectPanel(p.id) }}
                 onDoubleClick={(e) => { e.stopPropagation(); jumpToPanel(p.id) }}
               />
+            )
+          })}
+          {Object.entries(viewportBookmarks || {}).map(([numStr, bmViewport]) => {
+            if (!bmViewport) return null
+            const num = Number(numStr)
+            const bmWorldX = (window.innerWidth / 2 - bmViewport.x) / bmViewport.zoom
+            const bmWorldY = (window.innerHeight / 2 - bmViewport.y) / bmViewport.zoom
+            return (
+              <div
+                key={`bm-${num}`}
+                className="minimap-bookmark-dot"
+                style={{
+                  left: bmWorldX * scale,
+                  top: bmWorldY * scale,
+                }}
+                title={`Bookmark ${num} (Alt+${num})`}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  useWorkspaceStore.getState().loadViewportBookmark(num)
+                }}
+              >
+                {num}
+              </div>
             )
           })}
         </div>

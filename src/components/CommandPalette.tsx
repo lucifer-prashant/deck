@@ -56,6 +56,22 @@ const CommandPalette: React.FC = () => {
   const toggleCommandPalette = useWorkspaceStore(s => s.toggleCommandPalette)
   const theme = useWorkspaceStore(s => s.theme)
 
+  const previousActiveElement = useRef<HTMLElement | null>(null)
+
+  useEffect(() => {
+    previousActiveElement.current = document.activeElement as HTMLElement | null
+    return () => {
+      const el = previousActiveElement.current
+      if (el && document.body.contains(el)) {
+        requestAnimationFrame(() => {
+          if (document.body.contains(el)) {
+            el.focus()
+          }
+        })
+      }
+    }
+  }, [])
+
   const [query, setQuery] = useState('')
   const [selectedIndex, setSelectedIndex] = useState(0)
 
