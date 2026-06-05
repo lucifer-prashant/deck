@@ -32,6 +32,9 @@ const hasAnyContent = (value: string): boolean => {
   } catch { return false }
 }
 
+const writeTimeouts: Record<string, any> = {}
+const pendingWrites: Record<string, { name: string; value: string }> = {}
+
 const dualStorage = {
   getItem: (name: string): string | null | Promise<string | null> => {
     // Fast path: localStorage is synchronous — use it if it has real data.
@@ -54,6 +57,27 @@ const dualStorage = {
     // Only write to file when there's real content — prevents an empty-state write
     // from wiping a previously good backup (e.g. after a Chromium quota reset).
     if (!hasAnyContent(value)) return
+
+    pendingWrites[name] = { name, value }
+
+    if (writeTimeouts[name]) {
+      clearTimeout(writeTimeouts[name])
+    }
+
+    writeTimeouts[name] = setTimeout(() => {
+      dualStorage.flushItem(name)
+    }, 400)
+  },
+  flushItem: (name: string): void => {
+    if (writeTimeouts[name]) {
+      clearTimeout(writeTimeouts[name])
+      delete writeTimeouts[name]
+    }
+    const pending = pendingWrites[name]
+    if (!pending) return
+    delete pendingWrites[name]
+
+    const { value } = pending
     const eapiW = window.electronAPI
     getAppDataHome().then(home => {
       if (home && eapiW?.file?.write) {
@@ -67,7 +91,17 @@ const dualStorage = {
       }
     }).catch(() => null)
   },
+  flushAll: (): void => {
+    Object.keys(pendingWrites).forEach(name => {
+      dualStorage.flushItem(name)
+    })
+  },
   removeItem: (name: string): void => {
+    if (writeTimeouts[name]) {
+      clearTimeout(writeTimeouts[name])
+      delete writeTimeouts[name]
+    }
+    delete pendingWrites[name]
     localStorage.removeItem(name)
     const eapiD = window.electronAPI
     getAppDataHome().then(home => {
@@ -77,6 +111,9 @@ const dualStorage = {
     }).catch(() => null)
   }
 }
+
+;(window as any).__flushWorkspaceBackup = () => dualStorage.flushAll()
+
 
 
 
@@ -636,7 +673,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           future,
           panels: prev.panels,
           selectedPanelIds: prev.selectedPanelIds,
-          ...syncActiveTab(state, { panels: prev.panels, selectedPanelIds: prev.selectedPanelIds })
+          ...syncActiveTab(state, { panels: prev.panels, selectedPanelIds: prev.selectedPanelIds }, { skipDirty: true })
         }
       }),
 
@@ -650,7 +687,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           future,
           panels: next.panels,
           selectedPanelIds: next.selectedPanelIds,
-          ...syncActiveTab(state, { panels: next.panels, selectedPanelIds: next.selectedPanelIds })
+          ...syncActiveTab(state, { panels: next.panels, selectedPanelIds: next.selectedPanelIds }, { skipDirty: true })
         }
       }),
 
@@ -953,7 +990,16 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           // Restore custom (user-added) panels from graveyard — notes, browsers, etc.
           Object.entries(graveyard).forEach(([id, data]) => {
             if (!id.startsWith('preset-') && !panelMap[id]) {
-              panelMap[id] = data as Panel
+              if (
+                data.type &&
+                typeof data.x === 'number' &&
+                typeof data.y === 'number' &&
+                typeof data.width === 'number' &&
+                typeof data.height === 'number' &&
+                typeof data.title === 'string'
+              ) {
+                panelMap[id] = data as Panel
+              }
             }
           })
           const fitted = fitViewportToPanels(panelMap)
@@ -978,6 +1024,8 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             past: [],
             future: []
           }))
+        }).catch(err => {
+          console.error('Failed to load presets module:', err)
         })
       },
 
@@ -1379,7 +1427,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         const width = maxX - minX + 40
         const height = maxY - minY + 40
 
-        const regionId = `region-${Date.now()}`
+        const regionId = `region-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
         const regionPanel: Panel = {
           id: regionId,
           type: 'region',

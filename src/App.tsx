@@ -93,27 +93,48 @@ function MainAppShell() {
         } else if (t.linkedPresetId && s.canvasPresets[t.linkedPresetId]) {
           s.overwriteCanvasPreset(t.linkedPresetId)
         } else {
-          s.saveCanvasPreset(t.title || 'Canvas')
+          // Normal tab: do not silently create a new preset. Just mark it clean.
+          useWorkspaceStore.setState(state => ({
+            tabs: state.tabs.map(tab => tab.id === t.id ? { ...tab, lastSavedAt: Date.now() } : tab)
+          }))
         }
       })
       s.markTabSaved()
+      ;(window as any).__flushWorkspaceBackup?.()
       window.electronAPI?.appClose?.forceClose()
     })
     return () => unsub?.()
   }, [])
 
   useEffect(() => {
-    const gridFallbacks: Record<string, string> = {
-      none: '#1f2024',
-      grid: '#1f2024',
-      dot: '#1f2024',
+    const mq = window.matchMedia('(prefers-color-scheme: light)')
+    const getGridFallbacks = (isSystemLight: boolean) => ({
+      none: isSystemLight ? '#f5f6f8' : '#1f2024',
+      grid: isSystemLight ? '#f5f6f8' : '#1f2024',
+      dot: isSystemLight ? '#f5f6f8' : '#1f2024',
       blueprint: '#182848',
       neon: '#0d0e15'
-    }
+    })
 
     const updateDynamicTheme = (baseColor: string) => {
-      const color = baseColor || gridFallbacks[useWorkspaceStore.getState().prefs.canvasGridStyle ?? 'none'] || '#1f2024'
+      const isSystemLight = window.matchMedia('(prefers-color-scheme: light)').matches
+      const color = baseColor || getGridFallbacks(isSystemLight)[useWorkspaceStore.getState().prefs.canvasGridStyle ?? 'none'] || (isSystemLight ? '#f5f6f8' : '#1f2024')
       
+      if (color.toLowerCase() === '#0d1117') {
+        const vars = [
+          '--fg', '--fg-muted', '--panel-bg', '--panel-header-bg', '--panel-border',
+          '--panel-title', '--chrome-bg', '--chrome-border', '--status-bg',
+          '--selection-color', '--menu-bg', '--menu-fg', '--menu-border',
+          '--menu-hover', '--btn-text', '--error-fg', '--error-border',
+          '--modal-bg', '--modal-border', '--input-bg'
+        ]
+        const root = document.documentElement
+        root.style.setProperty('--bg', color)
+        vars.forEach(v => root.style.removeProperty(v))
+        root.setAttribute('data-theme', 'midnight')
+        return
+      }
+
       const cleanHex = color.replace('#', '')
       let r = 31, g = 32, b = 36
       if (cleanHex.length === 6) {
@@ -208,11 +229,18 @@ function MainAppShell() {
       }
     }
 
-    const baseColor = prefs.canvasBgColor || gridFallbacks[prefs.canvasGridStyle ?? 'none'] || '#1f2024'
+    const baseColor = prefs.canvasBgColor || getGridFallbacks(mq.matches)[prefs.canvasGridStyle ?? 'none'] || (mq.matches ? '#f5f6f8' : '#1f2024')
     updateDynamicTheme(baseColor)
 
+    const handler = () => {
+      const freshColor = prefs.canvasBgColor || getGridFallbacks(mq.matches)[prefs.canvasGridStyle ?? 'none'] || (mq.matches ? '#f5f6f8' : '#1f2024')
+      updateDynamicTheme(freshColor)
+    }
+
+    mq.addEventListener('change', handler)
     window.__updateDynamicTheme = updateDynamicTheme
     return () => {
+      mq.removeEventListener('change', handler)
       delete window.__updateDynamicTheme
     }
   }, [prefs.canvasBgColor, prefs.canvasGridStyle])
@@ -278,8 +306,8 @@ function MainAppShell() {
       const isInsidePanelBody =
         (!!targetBody && !isRegionBody(targetBody)) ||
         (!!activeBody && !isRegionBody(activeBody)) ||
-        target?.tagName === 'WEBVIEW' ||
-        active?.tagName === 'WEBVIEW'
+        target?.tagName?.toLowerCase() === 'webview' ||
+        active?.tagName?.toLowerCase() === 'webview'
 
       // Read live state to avoid stale closure on rapid Tab→Esc sequences.
       const liveJump = useWorkspaceStore.getState().jumpMode
@@ -736,8 +764,7 @@ function MainAppShell() {
     // Capture phase so xterm/webview can't swallow Escape via stopPropagation before us.
     window.addEventListener('keydown', handleKeyDown, true)
     return () => window.removeEventListener('keydown', handleKeyDown, true)
-  // panels/selectedPanelIds/updatePanel/jumpMode omitted — handler reads live state via getState()
-  }, [toggleCommandPalette, togglePanelFinder, toggleHelp, undo, redo, undoAnnotation, redoAnnotation, toggleMinimap, setJumpMode, selectPanel, toggleChrome, toggleAnnotateMode, togglePanelSwitcher, openWinTabSwitcher, prefs.canvasBgColor, prefs.canvasGridStyle])
+  }, [toggleCommandPalette, togglePanelFinder, toggleHelp, undo, redo, undoAnnotation, redoAnnotation, toggleMinimap, setJumpMode, selectPanel, toggleChrome, toggleAnnotateMode, togglePanelSwitcher, openWinTabSwitcher])
 
   useEffect(() => {
     const validCommands = new Set<WorkspaceCommand>([

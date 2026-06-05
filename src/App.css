@@ -506,6 +506,17 @@ body,
 	border: 2px solid transparent;
 }
 
+[data-theme="light"] ::-webkit-scrollbar-thumb {
+	background: rgba(0, 0, 0, 0.12);
+	background-clip: padding-box;
+	border: 2px solid transparent;
+}
+[data-theme="light"] ::-webkit-scrollbar-thumb:hover {
+	background: rgba(0, 0, 0, 0.24);
+	background-clip: padding-box;
+	border: 2px solid transparent;
+}
+
 .app {
 	width: 100vw;
 	height: 100vh;
@@ -625,7 +636,7 @@ button:focus-visible,
 	z-index: 11000;
 	pointer-events: none;
 	background: rgba(0, 0, 0, 0.32);
-	backdrop-filter: blur(1px) saturate(120%);
+	backdrop-filter: blur(6px) saturate(120%);
 	-webkit-backdrop-filter: blur(6px) saturate(120%);
 }
 

@@ -12,8 +12,44 @@ interface Props {
 const PopoutWindow: React.FC<Props> = ({ panelId }) => {
   const initialize = useWorkspaceStore(s => s.initialize)
   const panel = useWorkspaceStore(s => s.panels[panelId])
-  const theme = useWorkspaceStore(s => s.theme)
+  const prefs = useWorkspaceStore(s => s.prefs)
   const [redocking, setRedocking] = useState(false)
+  const [systemIsLight, setSystemIsLight] = useState(() => window.matchMedia('(prefers-color-scheme: light)').matches)
+
+  useEffect(() => {
+    const mq = window.matchMedia('(prefers-color-scheme: light)')
+    const handler = () => setSystemIsLight(mq.matches)
+    mq.addEventListener('change', handler)
+    return () => mq.removeEventListener('change', handler)
+  }, [])
+
+  const theme = useMemo(() => {
+    const gridFallbacks: Record<string, string> = {
+      none: systemIsLight ? '#f5f6f8' : '#1f2024',
+      grid: systemIsLight ? '#f5f6f8' : '#1f2024',
+      dot: systemIsLight ? '#f5f6f8' : '#1f2024',
+      blueprint: '#182848',
+      neon: '#0d0e15'
+    }
+    const color = prefs.canvasBgColor || gridFallbacks[prefs.canvasGridStyle ?? 'none'] || (systemIsLight ? '#f5f6f8' : '#1f2024')
+    if (color.toLowerCase() === '#0d1117') return 'midnight'
+    
+    const cleanHex = color.replace('#', '')
+    let r = 31, g = 32, b = 36
+    if (cleanHex.length === 6) {
+      const num = parseInt(cleanHex, 16)
+      r = (num >> 16) & 255
+      g = (num >> 8) & 255
+      b = num & 255
+    } else if (cleanHex.length === 3) {
+      r = parseInt(cleanHex[0] + cleanHex[0], 16)
+      g = parseInt(cleanHex[1] + cleanHex[1], 16)
+      b = parseInt(cleanHex[2] + cleanHex[2], 16)
+    }
+
+    const hsp = Math.sqrt(0.299 * (r * r) + 0.587 * (g * g) + 0.114 * (b * b))
+    return hsp > 155 ? 'light' : 'dark'
+  }, [prefs.canvasBgColor, prefs.canvasGridStyle, systemIsLight])
 
   useEffect(() => { initialize() }, [initialize])
 
@@ -35,13 +71,6 @@ const PopoutWindow: React.FC<Props> = ({ panelId }) => {
   }, [])
 
   useEffect(() => {
-    if (theme === 'system') {
-      const mq = window.matchMedia('(prefers-color-scheme: light)')
-      const apply = () => document.documentElement.setAttribute('data-theme', mq.matches ? 'light' : 'dark')
-      apply()
-      mq.addEventListener('change', apply)
-      return () => mq.removeEventListener('change', apply)
-    }
     document.documentElement.setAttribute('data-theme', theme)
   }, [theme])
 

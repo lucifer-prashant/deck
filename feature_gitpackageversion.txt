@@ -104,73 +104,73 @@
   🔴 CONFIRMED BUGS
 ────────────────────────────────────────────────────────────────────────────────
 
-  BUG-001  UNDO MAKES TABS APPEAR DIRTY
+  BUG-001  [RESOLVED ✓] UNDO MAKES TABS APPEAR DIRTY
            undo() calls syncActiveTab() which sets lastEditedAt = Date.now().
            Undoing back to original state still shows "unsaved changes" badge.
            File: src/store/workspaceStore.ts ~L639
            Fix: pass skipDirty flag when calling syncActiveTab from undo/redo.
 
-  BUG-002  [data-theme="system"] CSS IS BROKEN
+  BUG-002  [RESOLVED ✓] [data-theme="system"] CSS IS BROKEN
            The system theme only sets color-scheme: dark light but provides
            zero CSS variable overrides. Light-OS users always get dark theme.
            File: src/App.css ~L107-109
            Fix: add full variable set under a prefers-color-scheme: light block
            or resolve it properly in JS before paint.
 
-  BUG-003  LIGHT THEME SCROLLBAR INVISIBLE
+  BUG-003  [RESOLVED ✓] LIGHT THEME SCROLLBAR INVISIBLE
            Scrollbar thumb is rgba(255,255,255,0.08) — invisible on white bg.
            No [data-theme="light"] override exists for scrollbar styles.
            File: src/App.css ~L498-506
            Fix: add [data-theme="light"] ::-webkit-scrollbar-thumb override.
 
-  BUG-004  REGION ID COLLISION POSSIBLE
+  BUG-004  [RESOLVED ✓] REGION ID COLLISION POSSIBLE
            Region IDs use 'region-${Date.now()}' with no random suffix.
            Tab IDs have a random part but region IDs don't. Two rapid region
            creations in the same millisecond produce duplicate IDs.
            File: src/store/workspaceStore.ts ~L1382
            Fix: use crypto.randomUUID() or append Math.random().toString(36).
 
-  BUG-005  KEYBOARD HANDLER RE-ATTACHES ON CANVAS BG COLOR CHANGE
+  BUG-005  [RESOLVED ✓] KEYBOARD HANDLER RE-ATTACHES ON CANVAS BG COLOR CHANGE
            prefs.canvasBgColor and prefs.canvasGridStyle are in the keyboard
            handler's useEffect dep array for no reason. Every colour picker
            interaction re-registers the entire 490-line keyboard listener.
            File: src/App.tsx ~L740
            Fix: remove unrelated prefs from keyboard handler dep array.
 
-  BUG-006  BACKDROP-FILTER BLUR INCONSISTENCY IN JUMP OVERLAY
+  BUG-006  [RESOLVED ✓] BACKDROP-FILTER BLUR INCONSISTENCY IN JUMP OVERLAY
            -webkit-backdrop-filter: blur(6px) vs backdrop-filter: blur(1px)
            in the same rule. One of these is wrong.
            File: src/App.css ~L628-629
 
-  BUG-007  webview TAG NAME CASE CHECK
+  BUG-007  [RESOLVED ✓] webview TAG NAME CASE CHECK
            target?.tagName === 'WEBVIEW' should be target?.tagName?.toLowerCase()
            === 'webview' for cross-platform safety.
            File: src/App.tsx ~L282
 
-  BUG-008  UNDO / GRAVEYARD UNSAFE CAST
+  BUG-008  [RESOLVED ✓] UNDO / GRAVEYARD UNSAFE CAST
            Graveyard stores Partial<Panel> but is cast to Panel on restore.
            Missing required fields (x, y, width, height, type) on a graveyard
            entry could crash the canvas silently.
            File: src/store/workspaceStore.ts ~L956
 
-  BUG-009  loadPreset() HAS UNHANDLED PROMISE REJECTION
+  BUG-009  [RESOLVED ✓] loadPreset() HAS UNHANDLED PROMISE REJECTION
            Dynamic import('../presets') has no .catch(). If the module fails
            to load, the rejection is silent and the canvas just does nothing.
            File: src/store/workspaceStore.ts ~L851-981
 
-  BUG-010  dualStorage.setItem HAS ZERO DEBOUNCE
+  BUG-010  [RESOLVED ✓] dualStorage.setItem HAS ZERO DEBOUNCE
            Writes to disk on every single state change including while
            dragging a panel pixel-by-pixel. Hammers the filesystem constantly.
            File: src/store/workspaceStore.ts ~L52-68
            Fix: debounce file writes by 300-500ms.
 
-  BUG-011  AUTO-SAVE ON CLOSE CREATES ACCUMULATING PRESETS
+  BUG-011  [RESOLVED ✓] AUTO-SAVE ON CLOSE CREATES ACCUMULATING PRESETS
            On app close, saveCanvasPreset(t.title || 'Canvas') creates a NEW
            preset for every unsaved tab silently. After enough sessions the
            Presets panel fills up with "Canvas", "Canvas (1)", etc.
            File: src/App.tsx ~L98-100
 
-  BUG-012  MIDNIGHT THEME UNREACHABLE FROM UI
+  BUG-012  [RESOLVED ✓] MIDNIGHT THEME UNREACHABLE FROM UI
            [data-theme="midnight"] is fully defined in CSS with all variables
            but no Preferences toggle exposes it.
            File: src/App.css ~L69-83
