@@ -475,8 +475,6 @@ body,
 		"Helvetica Neue",
 		Arial,
 		sans-serif;
-	-webkit-font-smoothing: antialiased;
-	-moz-osx-font-smoothing: grayscale;
 	text-rendering: optimizeLegibility;
 	font-size: 13px;
 }
@@ -660,7 +658,6 @@ button:focus-visible,
 		0 0 0 3px rgba(77, 171, 232, 0.55);
 	transform: translate(-50%, -50%) translateZ(0);
 	will-change: transform;
-	-webkit-font-smoothing: antialiased;
 	text-rendering: geometricPrecision;
 	animation: jump-pop 140ms cubic-bezier(0.22, 1, 0.36, 1);
 }

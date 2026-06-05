@@ -1,0 +1,44 @@
+========================================================================
+DECK — AUTOMATED WINDOWS & LINUX RELEASES (GITHUB ACTIONS WORKFLOW)
+========================================================================
+
+1. WHAT IS THE WORKFLOW?
+------------------------
+We created a GitHub Actions workflow configuration in:
+`.github/workflows/release.yml`
+
+This file tells GitHub to automatically run cloud servers to build the app
+every time you push a new version tag (like v0.6.0, v0.7.0, etc.).
+- A Windows cloud server builds the Windows installer (.exe) and portable executable.
+- A Linux cloud server builds the AppImage, .deb, and .rpm packages.
+- Once finished, GitHub automatically drafts a Release page on your repository
+  and attaches all built files for anyone to download.
+
+2. WHY CAN'T WE BUILD THE .EXE DIRECTLY FROM LINUX?
+----------------------------------------------------
+- The app uses `node-pty` to run terminals inside the panels.
+- `node-pty` contains native C++ code that must compile specifically for Windows.
+- Compiling Windows C++ code on a Linux host (cross-compiling) requires a tool
+  called Wine (a Windows emulator). Without Wine and complex setup, local
+  builds for Windows on Linux will fail.
+- GitHub Actions solves this by compiling natively on real Windows servers in the cloud.
+
+3. HOW TO TRIGGER FUTURE RELEASES (STEP-BY-STEP)
+------------------------------------------------
+Whenever you add new features and want to publish a new release:
+
+Step 1: Commit and push your latest code changes to `main`:
+    git add .
+    git commit -m "feat: your new feature description"
+    git push origin main
+
+Step 2: Tag the commit with the new version number (e.g., v0.7.0):
+    git tag v0.7.0
+
+Step 3: Push the tag to GitHub:
+    git push origin v0.7.0
+
+Step 4: Watch it build live!
+    Go to: https://github.com/lucifer-prashant/deck/actions
+    The build takes about 5 to 8 minutes. Once it completes, the downloads will
+    be ready at: https://github.com/lucifer-prashant/deck/releases

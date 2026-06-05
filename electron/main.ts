@@ -178,6 +178,7 @@ function createWindow() {
     minWidth: 800,
     minHeight: 600,
     show: false,
+    backgroundColor: '#1f2024',
     webPreferences: {
       preload: join(__dirname, 'preload.js'),
       nodeIntegration: false,
@@ -754,6 +755,7 @@ const createPopoutWindow = (panelId: string) => {
     minWidth: 400,
     minHeight: 300,
     show: false,
+    backgroundColor: '#1f2024',
     webPreferences: {
       preload: join(__dirname, 'preload.js'),
       nodeIntegration: false,
