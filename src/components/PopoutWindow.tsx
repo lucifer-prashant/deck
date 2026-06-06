@@ -32,7 +32,7 @@ const PopoutWindow: React.FC<Props> = ({ panelId }) => {
       neon: '#0d0e15'
     }
     const color = prefs.canvasBgColor || gridFallbacks[prefs.canvasGridStyle ?? 'none'] || (systemIsLight ? '#f5f6f8' : '#1f2024')
-    if (color.toLowerCase() === '#0d1117') return 'midnight'
+    if (color.toLowerCase() === '#1f2024' || color.toLowerCase() === '#0d1117') return 'midnight'
     
     const cleanHex = color.replace('#', '')
     let r = 31, g = 32, b = 36

@@ -801,3 +801,126 @@
 }
 
 .panel.locked .panel-title { color: rgba(255,255,255,0.55); }
+
+/* Shell Switcher Pill */
+.terminal-shell-switcher {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+}
+
+.shell-switcher-pill {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 99px;
+  padding: 2px 7px;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 10px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  user-select: none;
+  font-family: inherit;
+  line-height: 1;
+}
+
+.shell-switcher-pill i {
+  font-size: 11px;
+  color: var(--selection-color, #4dabe8);
+}
+
+.shell-switcher-pill:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.2);
+  color: #fff;
+}
+
+.shell-switcher-pill .pill-arrow {
+  font-size: 7px;
+  opacity: 0.5;
+  margin-left: 1px;
+  transition: transform 0.2s ease;
+}
+
+.shell-switcher-pill:active {
+  transform: scale(0.96);
+}
+
+/* Dropdown Menu */
+.shell-dropdown-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 5px;
+  background: rgba(30, 31, 36, 0.95);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.02) inset;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  z-index: 10000;
+  min-width: 140px;
+  animation: shellMenuIn 0.15s cubic-bezier(0, 0, 0.2, 1);
+}
+
+@keyframes shellMenuIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.shell-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 12px;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 11.5px;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  width: 100%;
+  font-family: inherit;
+}
+
+.shell-dropdown-item i {
+  font-size: 12.5px;
+  opacity: 0.7;
+}
+
+.shell-dropdown-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+
+.shell-dropdown-item:hover i {
+  opacity: 1;
+  color: var(--selection-color, #4dabe8);
+}
+
+.shell-dropdown-item.active {
+  background: rgba(77, 171, 232, 0.15);
+  color: #4dabe8;
+  font-weight: 600;
+}
+
+.shell-dropdown-item.active i {
+  opacity: 1;
+  color: #4dabe8;
+}

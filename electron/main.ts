@@ -7,6 +7,7 @@ import * as net from 'net'
 import * as pty from 'node-pty'
 import * as crypto from 'crypto'
 import * as http from 'http'
+import { SHELL_CONFIGS, TerminalShellType } from '../src/types/terminalShells'
 
 // ─── Single Instance Lock ───────────────────────────────────────────────────
 const gotTheLock = app.requestSingleInstanceLock()
@@ -474,18 +475,56 @@ ipcMain.handle('get-webview-preload-path', () => {
   return join(__dirname, 'webview-preload.js')
 })
 
+function resolveShellPath(shellType: TerminalShellType | null, customPath: string): string {
+  if (!shellType || shellType === 'custom') {
+    return customPath || (IS_WIN ? (process.env.COMSPEC || 'cmd.exe') : (process.env.SHELL || '/bin/bash'))
+  }
+
+  // For gitbash, check if defaultPath exists (Windows only)
+  if (shellType === 'gitbash' && IS_WIN) {
+    const hint = SHELL_CONFIGS.gitbash.defaultPath
+    if (hint && existsSync(hint)) {
+      return hint
+    }
+    // Check other common paths for Git Bash
+    const paths = [
+      'C:\\Program Files\\Git\\bin\\bash.exe',
+      'C:\\Program Files\\Git\\usr\\bin\\bash.exe',
+      join(process.env.USERPROFILE || '', 'AppData\\Local\\Programs\\Git\\bin\\bash.exe'),
+      join(process.env.USERPROFILE || '', 'AppData\\Local\\Programs\\Git\\usr\\bin\\bash.exe'),
+      join(process.env.LOCALAPPDATA || '', 'Programs\\Git\\bin\\bash.exe'),
+    ]
+    for (const p of paths) {
+      if (p && existsSync(p)) {
+        return p
+      }
+    }
+    // Fallback if not found
+    return customPath || 'bash.exe'
+  }
+
+  const hint = SHELL_CONFIGS[shellType]?.defaultPath
+  return hint || (IS_WIN ? (process.env.COMSPEC || 'cmd.exe') : (process.env.SHELL || '/bin/bash'))
+}
+
 // ---- pty ----
-ipcMain.handle('pty:spawn', (e, args: { panelId: string; cwd?: string; cols?: number; rows?: number; shell?: string }) => {
+ipcMain.handle('pty:spawn', (e, args: { panelId: string; cwd?: string; cols?: number; rows?: number; shell?: string; shellType?: TerminalShellType; customPath?: string }) => {
   const { panelId } = args
   if (ptys.has(panelId)) return { ok: true, panelId }
 
-  // Shell resolution:
-  //   Windows — prefer PowerShell, fall back to cmd.exe (from %COMSPEC%).
-  //   Unix    — honour $SHELL, fall back to bash.
-  const shellPath = args.shell
-    || (IS_WIN
-      ? (process.env.COMSPEC || 'cmd.exe')
-      : (process.env.SHELL || '/bin/bash'))
+  let shellType = args.shellType || null
+  let customPath = args.customPath || ''
+
+  if (!shellType && args.shell) {
+    if (['powershell', 'cmd', 'wsl', 'gitbash', 'custom'].includes(args.shell)) {
+      shellType = args.shell as TerminalShellType
+    } else {
+      shellType = 'custom'
+      customPath = args.shell
+    }
+  }
+
+  const shellPath = resolveShellPath(shellType, customPath)
 
   const cwd = args.cwd && args.cwd.length ? args.cwd : homedir()
 
@@ -1071,6 +1110,12 @@ const CODE_SERVER_CANDIDATES: string[] = IS_WIN
       join(homedir(), 'AppData', 'Local', 'Programs', 'code-server', 'bin', 'code-server.cmd'),
       join(homedir(), 'AppData', 'Local', 'Programs', 'code-server', 'code-server.cmd'),
       join(homedir(), 'scoop', 'shims', 'code-server.cmd'),
+      join(process.env.APPDATA || join(homedir(), 'AppData', 'Roaming'), 'npm', 'code-server.cmd'),
+      join(process.env.APPDATA || join(homedir(), 'AppData', 'Roaming'), 'npm', 'node_modules', '.bin', 'code-server.cmd'),
+      join(process.env.ProgramFiles || 'C:\\Program Files', 'code-server', 'bin', 'code-server.cmd'),
+      join(process.env.ProgramFiles || 'C:\\Program Files', 'code-server', 'code-server.cmd'),
+      join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'code-server', 'bin', 'code-server.cmd'),
+      join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'code-server', 'code-server.cmd'),
       'code-server.cmd'
     ]
   : [
@@ -1146,8 +1191,12 @@ const getStablePort = async (userDataDir: string): Promise<number> => {
 }
 
 const startCodeServer = async (): Promise<{ ok: boolean; port?: number; url?: string; error?: string }> => {
-  if (codeServerProc && codeServerPort) {
-    return { ok: true, port: codeServerPort, url: `http://127.0.0.1:${codeServerPort}` }
+  if (codeServerProc) {
+    if (codeServerPort) {
+      return { ok: true, port: codeServerPort, url: `http://127.0.0.1:${codeServerPort}` }
+    }
+    if (codeServerStarting) return codeServerStarting
+    return { ok: false, error: 'code-server is already starting or running' }
   }
   if (codeServerStarting) return codeServerStarting
   const bin = findCodeServerBin()

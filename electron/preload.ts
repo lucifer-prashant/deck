@@ -1,6 +1,8 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
 contextBridge.exposeInMainWorld('electronAPI', {
+  platform: process.platform,
+  envShell: process.env.SHELL || process.env.COMSPEC || '',
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
   getPlatform: () => ipcRenderer.invoke('get-platform'),
   getWebviewPreloadPath: () => ipcRenderer.invoke('get-webview-preload-path'),
@@ -131,6 +133,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
 declare global {
   interface Window {
     electronAPI: {
+      platform: string
+      envShell: string
       getAppVersion: () => Promise<string>
       getPlatform: () => Promise<string>
       getWebviewPreloadPath: () => Promise<string>

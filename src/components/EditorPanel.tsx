@@ -25,7 +25,7 @@ const EditorPanel: React.FC<Props> = ({ panel }) => {
   const [folderPath, setFolderPath] = useState<string | undefined>(settings.folderPath)
   const [startError, setStartError] = useState<string>('')
 
-  // Try to bring up code-server on mount. Falls back to install prompt or monaco scratch.
+  // Try to bring up code-server on mount. Falls back to install prompt or monaco fallback.
   useEffect(() => {
     let cancelled = false
     const api = window.electronAPI?.codeServer
@@ -64,12 +64,23 @@ const EditorPanel: React.FC<Props> = ({ panel }) => {
   }
 
   if (mode === 'install') {
-    return <InstallPrompt error={startError} onRetry={async () => {
-      setMode('loading')
-      const r = await window.electronAPI?.codeServer?.start()
-      if (r?.ok && r.url) { setServerUrl(r.url); setMode('codeserver') }
-      else { setStartError(r?.error || 'unknown'); setMode('install') }
-    }} onFallback={() => setMode('monaco')} />
+    return (
+      <InstallPrompt
+        error={startError}
+        onRetry={async () => {
+          const r = await window.electronAPI?.codeServer?.start()
+          if (r?.ok && r.url) {
+            setServerUrl(r.url)
+            setMode('codeserver')
+          } else {
+            const errMsg = r?.error || 'unknown'
+            setStartError(errMsg)
+            throw new Error(errMsg)
+          }
+        }}
+        onFallback={() => setMode('monaco')}
+      />
+    )
   }
 
   if (mode === 'monaco') {
@@ -237,29 +248,363 @@ const CodeServerWebview: React.FC<{ panelId: string; url: string; onFolderChange
   return React.createElement('webview', props)
 }
 
-const InstallPrompt: React.FC<{ error: string; onRetry: () => void; onFallback: () => void }> = ({ error, onRetry, onFallback }) => {
-  const cmd = 'curl -fsSL https://code-server.dev/install.sh | sh'
+const InstallPrompt: React.FC<{ error: string; onRetry: () => Promise<void>; onFallback: () => void }> = ({ error, onRetry, onFallback }) => {
+  const isWin = (window.electronAPI?.platform || 'linux') === 'win32'
+  const [activeTab, setActiveTab] = useState<'windows' | 'nix'>(isWin ? 'windows' : 'nix')
+  const [manualOpen, setManualOpen] = useState(false)
+  const [isChecking, setIsChecking] = useState(false)
+  const [localError, setLocalError] = useState(error)
+
+  useEffect(() => {
+    setLocalError(error)
+  }, [error])
+
+  const handleCheckAgain = async () => {
+    if (isChecking) return
+    setIsChecking(true)
+    setLocalError('')
+    try {
+      await onRetry()
+    } catch (err) {
+      setLocalError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setIsChecking(false)
+    }
+  }
+
+  const npmCmd = 'npm install -g code-server'
+  const nixCmd = 'curl -fsSL https://code-server.dev/install.sh | sh'
+
   return (
-    <div style={{ padding: 20, color: '#d4d4d4', fontFamily: 'JetBrains Mono, monospace', fontSize: 12, overflow: 'auto', height: '100%', boxSizing: 'border-box' }}>
-      <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>code-server not available</div>
-      {error && <div style={{ color: '#ff8888', marginBottom: 12 }}>{error}</div>}
-      <div style={{ marginBottom: 8, opacity: 0.85 }}>install once, then click retry:</div>
-      <div style={{
-        background: '#0d0d10', padding: '10px 12px', borderRadius: 6, border: '1px solid #2a2a2a',
-        userSelect: 'all', cursor: 'text', marginBottom: 12, fontFamily: 'inherit', fontSize: 12, overflowX: 'auto', whiteSpace: 'nowrap'
-      }}>
-        {cmd}
+    <div className="codeserver-install-root">
+      <style>{`
+        .codeserver-install-root {
+          padding: 24px;
+          color: #d4d4d4;
+          font-family: 'Outfit', 'Inter', system-ui, -apple-system, sans-serif;
+          font-size: 13px;
+          overflow-y: auto;
+          height: 100%;
+          box-sizing: border-box;
+          background: rgba(20, 20, 25, 0.6);
+          backdrop-filter: blur(16px);
+          display: flex;
+          flex-direction: column;
+          gap: 16px;
+        }
+        .codeserver-title {
+          font-size: 16px;
+          font-weight: 600;
+          color: #fff;
+          margin-bottom: 4px;
+        }
+        .codeserver-error {
+          background: rgba(255, 107, 107, 0.08);
+          border: 1px solid rgba(255, 107, 107, 0.2);
+          border-radius: 6px;
+          padding: 10px 14px;
+          color: #ff8888;
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 11.5px;
+          line-height: 1.4;
+          word-break: break-all;
+        }
+        .codeserver-tabs {
+          display: flex;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+          gap: 16px;
+        }
+        .codeserver-tab-btn {
+          background: none;
+          border: none;
+          padding: 8px 4px 10px 4px;
+          color: rgba(255, 255, 255, 0.5);
+          font-family: inherit;
+          font-size: 13.5px;
+          font-weight: 500;
+          cursor: pointer;
+          position: relative;
+          transition: color 0.15s ease;
+        }
+        .codeserver-tab-btn:hover {
+          color: rgba(255, 255, 255, 0.85);
+        }
+        .codeserver-tab-btn.active {
+          color: var(--selection-color, #4dabe8);
+        }
+        .codeserver-tab-btn.active::after {
+          content: '';
+          position: absolute;
+          bottom: -1px;
+          left: 0;
+          width: 100%;
+          height: 2px;
+          background: var(--selection-color, #4dabe8);
+          border-radius: 2px;
+        }
+        .codeserver-section-title {
+          font-size: 13px;
+          font-weight: 600;
+          color: rgba(255, 255, 255, 0.9);
+          margin-bottom: 6px;
+          display: flex;
+          align-items: center;
+          gap: 6px;
+        }
+        .codeserver-wsl-callout {
+          color: #ffcc66;
+          font-size: 11px;
+          font-style: italic;
+          opacity: 0.85;
+          margin-top: 4px;
+        }
+        .codeserver-code-box {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          background: rgba(0, 0, 0, 0.35);
+          border: 1px solid rgba(255, 255, 255, 0.06);
+          border-radius: 6px;
+          padding: 8px 12px;
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 12px;
+          overflow-x: auto;
+          gap: 12px;
+        }
+        .codeserver-code-text {
+          white-space: nowrap;
+          color: #e6e8ec;
+        }
+        .codeserver-copy-btn {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          background: rgba(255, 255, 255, 0.06);
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          border-radius: 4px;
+          color: rgba(255, 255, 255, 0.7);
+          padding: 4px 8px;
+          font-family: inherit;
+          font-size: 11px;
+          cursor: pointer;
+          transition: all 0.15s ease;
+          flex-shrink: 0;
+        }
+        .codeserver-copy-btn:hover {
+          background: rgba(255, 255, 255, 0.12);
+          color: #fff;
+        }
+        .codeserver-copy-btn.copied {
+          background: rgba(78, 203, 113, 0.15);
+          border-color: rgba(78, 203, 113, 0.3);
+          color: #cfeebd;
+        }
+        .codeserver-collapsible-header {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          background: rgba(255, 255, 255, 0.03);
+          border: 1px solid rgba(255, 255, 255, 0.05);
+          border-radius: 6px;
+          padding: 10px 12px;
+          cursor: pointer;
+          font-weight: 500;
+          color: rgba(255, 255, 255, 0.85);
+          transition: background 0.15s ease;
+          user-select: none;
+        }
+        .codeserver-collapsible-header:hover {
+          background: rgba(255, 255, 255, 0.06);
+        }
+        .codeserver-collapsible-content {
+          padding: 12px 14px;
+          background: rgba(0, 0, 0, 0.15);
+          border: 1px solid rgba(255, 255, 255, 0.03);
+          border-top: none;
+          border-bottom-left-radius: 6px;
+          border-bottom-right-radius: 6px;
+          margin-top: -6px;
+          font-size: 12.5px;
+          line-height: 1.5;
+          color: rgba(255, 255, 255, 0.7);
+        }
+        .codeserver-footer-info {
+          font-size: 11.5px;
+          line-height: 1.6;
+          color: rgba(255, 255, 255, 0.4);
+          border-top: 1px solid rgba(255, 255, 255, 0.05);
+          padding-top: 12px;
+          margin-top: 8px;
+        }
+        .codeserver-actions {
+          display: flex;
+          gap: 10px;
+          margin-top: 4px;
+        }
+        .codeserver-btn {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          background: rgba(255, 255, 255, 0.06);
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          border-radius: 6px;
+          color: rgba(255, 255, 255, 0.85);
+          padding: 8px 16px;
+          font-family: inherit;
+          font-size: 12.5px;
+          font-weight: 500;
+          cursor: pointer;
+          transition: all 0.15s ease;
+        }
+        .codeserver-btn:hover:not(:disabled) {
+          background: rgba(255, 255, 255, 0.12);
+          color: #fff;
+        }
+        .codeserver-btn:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+        .codeserver-btn.primary {
+          background: color-mix(in srgb, var(--selection-color, #4dabe8) 20%, rgba(255, 255, 255, 0.05));
+          border-color: rgba(77, 171, 232, 0.35);
+          color: #cfe6ff;
+        }
+        .codeserver-btn.primary:hover:not(:disabled) {
+          background: color-mix(in srgb, var(--selection-color, #4dabe8) 30%, rgba(255, 255, 255, 0.05));
+          border-color: rgba(77, 171, 232, 0.5);
+          box-shadow: 0 0 10px rgba(77, 171, 232, 0.15);
+        }
+      `}</style>
+
+      <div>
+        <div className="codeserver-title">code-server not available</div>
+        <div style={{ opacity: 0.6 }}>An instance of code-server is required to power the workspace editor panel.</div>
       </div>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-        <button style={btnStyle} onClick={() => navigator.clipboard.writeText(cmd)}>copy command</button>
-        <button style={{ ...btnStyle, background: 'rgba(77,171,232,0.18)', color: '#cfe6ff' }} onClick={onRetry}>retry</button>
-        <button style={btnStyle} onClick={onFallback}>use scratch editor</button>
+
+      {localError && (
+        <div className="codeserver-error">
+          <strong>Startup Error:</strong> {localError}
+        </div>
+      )}
+
+      <div className="codeserver-tabs">
+        <button
+          className={`codeserver-tab-btn ${activeTab === 'windows' ? 'active' : ''}`}
+          onClick={() => setActiveTab('windows')}
+        >
+          Windows
+        </button>
+        <button
+          className={`codeserver-tab-btn ${activeTab === 'nix' ? 'active' : ''}`}
+          onClick={() => setActiveTab('nix')}
+        >
+          macOS / Linux
+        </button>
       </div>
-      <div style={{ opacity: 0.55, fontSize: 11, lineHeight: 1.5 }}>
-        - runs locally on 127.0.0.1 with a random port, --auth none, --disable-telemetry<br/>
-        - data lives in this app&apos;s userData dir (independent from any system code-server)<br/>
-        - one process shared across all editor panels
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, flex: 1 }}>
+        {activeTab === 'windows' ? (
+          <>
+            <div>
+              <div className="codeserver-section-title">Recommended: Install via npm</div>
+              <div style={{ marginBottom: 8, opacity: 0.75 }}>Run this command globally inside Windows PowerShell or CMD (not WSL):</div>
+              <CodeBlock text={npmCmd} />
+              <div className="codeserver-wsl-callout" style={{ opacity: 0.7 }}>
+                <em>Run this in Windows PowerShell or CMD — not your WSL terminal.</em>
+              </div>
+            </div>
+
+            <div style={{ marginTop: 8 }}>
+              <div
+                className="codeserver-collapsible-header"
+                onClick={() => setManualOpen(!manualOpen)}
+              >
+                <span>{manualOpen ? '▼' : '▶'}</span>
+                <span>Alternative: Manual Installation (GitHub Release)</span>
+              </div>
+              {manualOpen && (
+                <div className="codeserver-collapsible-content">
+                  1. Go to the <a href="https://github.com/coder/code-server/releases" target="_blank" rel="noreferrer" style={{ color: 'var(--selection-color, #4dabe8)' }}>code-server GitHub Releases</a> page.<br/>
+                  2. Download the latest Windows release zip (e.g. <code>code-server-*-windows-amd64.zip</code>).<br/>
+                  3. Extract it and place the folder in your Program Files directory.<br/>
+                  4. Add the extracted folder's <code>bin/</code> folder to your Windows system environment variables <strong>PATH</strong>.
+                </div>
+              )}
+            </div>
+          </>
+        ) : (
+          <div>
+            <div className="codeserver-section-title">Install via script</div>
+            <div style={{ marginBottom: 8, opacity: 0.75 }}>Execute the official installation script inside your terminal:</div>
+            <CodeBlock text={nixCmd} />
+          </div>
+        )}
       </div>
+
+      <div className="codeserver-actions">
+        <button
+          className="codeserver-btn primary"
+          onClick={handleCheckAgain}
+          disabled={isChecking}
+        >
+          {isChecking ? (
+            <>
+              <span className="spinner" style={{
+                display: 'inline-block',
+                width: 10,
+                height: 10,
+                border: '2px solid rgba(255,255,255,0.3)',
+                borderRadius: '50%',
+                borderTopColor: '#fff',
+                animation: 'spin 0.8s linear infinite',
+                marginRight: 4
+              }} />
+              <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+              Probing PATH...
+            </>
+          ) : (
+            "I've installed it — check again"
+          )}
+        </button>
+        <button
+          className="codeserver-btn"
+          onClick={onFallback}
+          disabled={isChecking}
+        >
+          Use Deck's built-in editor
+        </button>
+      </div>
+
+      <div className="codeserver-footer-info">
+        • runs locally on 127.0.0.1 with a randomly allocated port, --auth password (auto-managed), and --disable-telemetry<br/>
+        • user data and extension plugins reside in this application&apos;s isolated userData directory<br/>
+        • a single running process is safely shared across all of your active editor panels
+      </div>
+    </div>
+  )
+}
+
+const CodeBlock: React.FC<{ text: string }> = ({ text }) => {
+  const [copied, setCopied] = useState(false)
+
+  const handleCopy = async (e: React.MouseEvent) => {
+    e.stopPropagation()
+    await navigator.clipboard.writeText(text)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  return (
+    <div className="codeserver-code-box">
+      <div className="codeserver-code-text">{text}</div>
+      <button
+        type="button"
+        className={`codeserver-copy-btn ${copied ? 'copied' : ''}`}
+        onClick={handleCopy}
+      >
+        <i className={copied ? "ti ti-check" : "ti ti-copy"} />
+        <span>{copied ? "Copied!" : "Copy"}</span>
+      </button>
     </div>
   )
 }
@@ -387,7 +732,7 @@ const MonacoFallback: React.FC<{ panel: PanelType }> = ({ panel }) => {
         <button style={btnStyle} onClick={() => doSave(false)}>Save</button>
         <button style={btnStyle} onClick={() => doSave(true)}>Save As</button>
         <span style={{ flex: 1, opacity: 0.75, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {filePath || '(scratch · code-server not installed)'}{dirty ? ' ●' : ''}
+          {filePath || '(built-in editor · code-server not installed)'}{dirty ? ' ●' : ''}
         </span>
         <span style={{ opacity: 0.55 }}>{language}</span>
         <button style={{ ...btnStyle, opacity: wordWrap === 'on' ? 1 : 0.6 }} onClick={() => {

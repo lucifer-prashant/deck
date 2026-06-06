@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { getAnchorPoint, generateWigglyPath, generateArrowhead } from '@/annotationUtils'
+import { getAnchorPoint, generateWigglyPath, generateArrowhead, generateSmoothPath } from '@/annotationUtils'
 
 describe('getAnchorPoint', () => {
   const rect = { x: 100, y: 200, width: 400, height: 300 }
@@ -142,5 +142,33 @@ describe('generateArrowhead', () => {
     const path = generateArrowhead(50, 50, 50, 50)
     expect(path).not.toContain('NaN')
     expect(path).toMatch(/Z$/)
+  })
+})
+
+describe('generateSmoothPath', () => {
+  it('returns empty string for empty path', () => {
+    expect(generateSmoothPath([])).toBe('')
+  })
+
+  it('returns M command for 1 point path', () => {
+    expect(generateSmoothPath([{ x: 10, y: 20 }])).toBe('M 10 20')
+  })
+
+  it('returns wiggly path for 2 point path', () => {
+    const path = generateSmoothPath([{ x: 10, y: 20 }, { x: 110, y: 20 }])
+    expect(path).toMatch(/^M 10 20 C /)
+    expect(path).toContain('110 20')
+  })
+
+  it('returns a bendy wiggly path with Q and C commands for 3+ points', () => {
+    const path = generateSmoothPath([
+      { x: 100, y: 100 },
+      { x: 200, y: 100 },
+      { x: 200, y: 200 }
+    ])
+    // Starts at 100, 100, has C command for first segment, Q for corner, and C for last segment
+    expect(path).toMatch(/^M 100 100 C /)
+    expect(path).toContain('Q 200 100')
+    expect(path).toMatch(/200 200$/)
   })
 })

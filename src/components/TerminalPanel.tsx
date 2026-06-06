@@ -3,6 +3,7 @@ import { Terminal } from 'xterm'
 import { FitAddon } from 'xterm-addon-fit'
 import 'xterm/css/xterm.css'
 import { Panel as PanelType, useWorkspaceStore } from '../store/workspaceStore'
+import { TerminalShellType, SHELL_CONFIGS } from '../types/terminalShells'
 
 interface Props {
   panel: PanelType
@@ -133,8 +134,80 @@ const TerminalPanel: React.FC<Props> = ({ panel }) => {
       if (!spawnedRef.current) {
         spawnedRef.current = true
         const cwd = (panel.settings?.cwd as string | undefined) || undefined
-        const shell = prefs.defaultTerminalShell || undefined
-        api.spawn({ panelId: panel.id, cwd, cols, rows, shell }).catch(err => {
+
+        // Resolve shell path
+        const shellOverride = panel.settings?.shellPath as string | undefined
+        let shellType: TerminalShellType | null = null
+        let customPath = prefs.defaultTerminalShell || ''
+
+        if (shellOverride) {
+          if (shellOverride in SHELL_CONFIGS) {
+            shellType = shellOverride as TerminalShellType
+          } else {
+            shellType = 'custom'
+            customPath = shellOverride
+          }
+        } else {
+          // Fallback to defaultTerminalShellType
+          const defType = prefs.defaultTerminalShellType
+          if (defType && defType !== 'remember_last') {
+            if (defType === 'custom') {
+              shellType = 'custom'
+            } else {
+              shellType = defType as TerminalShellType
+            }
+          } else {
+            // Fallback to lastSpawnedShellType
+            const lastType = prefs.lastSpawnedShellType
+            if (lastType) {
+              shellType = lastType
+            } else {
+              shellType = 'powershell' // default fallback
+            }
+          }
+        }
+
+        const getShellTypeFromPath = (path: string | undefined): TerminalShellType | null => {
+          if (!path) return null
+          const s = path.toLowerCase()
+          if (s === 'powershell' || s.includes('powershell.exe')) return 'powershell'
+          if (s === 'cmd' || s.includes('cmd.exe')) return 'cmd'
+          if (s === 'wsl' || s.includes('wsl.exe')) return 'wsl'
+          if (s === 'gitbash' || s.includes('bash.exe')) return 'gitbash'
+          return 'custom'
+        }
+
+        api.spawn({
+          panelId: panel.id,
+          cwd,
+          cols,
+          rows,
+          shellType: shellType || undefined,
+          customPath
+        }).then(res => {
+          if (res?.ok) {
+            useWorkspaceStore.getState().updatePanel(panel.id, { healthState: 'alive' }, { skipHistory: true })
+            const spawnedPath = res.shell || undefined
+            const detectedShellType = getShellTypeFromPath(spawnedPath)
+            if (detectedShellType) {
+              useWorkspaceStore.getState().updatePrefs({ lastSpawnedShellType: detectedShellType })
+            }
+            if (spawnedPath) {
+              const currentPrefs = useWorkspaceStore.getState().prefs
+              const recent = currentPrefs.recentShellPaths || []
+              const filtered = recent.filter(p => p !== spawnedPath)
+              const updated = [spawnedPath, ...filtered].slice(0, 8)
+              useWorkspaceStore.getState().updatePrefs({ recentShellPaths: updated })
+
+              useWorkspaceStore.getState().updatePanel(panel.id, {
+                settings: {
+                  ...(panel.settings || {}),
+                  resolvedShellPath: spawnedPath
+                }
+              }, { skipHistory: true })
+            }
+          }
+        }).catch(err => {
           term.writeln(`\x1b[31m[spawn failed: ${String(err)}]\x1b[0m`)
         })
       }
@@ -178,9 +251,10 @@ const TerminalPanel: React.FC<Props> = ({ panel }) => {
       try { term.dispose() } catch { /* ignore */ }
       termRef.current = null
       fitRef.current = null
+      spawnedRef.current = false
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [panel.id])
+  }, [panel.id, panel.settings?.shellPath])
 
   // Esc handled globally in App.tsx. Here we intercept Ctrl+= / Ctrl+- / Ctrl+0 for font sizing,
   // plus Ctrl+Shift+C copy and Ctrl+Shift+V paste.

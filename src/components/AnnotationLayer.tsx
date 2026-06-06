@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { useWorkspaceStore, Annotation } from "../store/workspaceStore"
-import { getAnchorPoint, generateWigglyPath } from "../annotationUtils"
+import { getAnchorPoint, generateWigglyPath, resolveConnectionRoute, generateRoundedPath, generateStraightPath, generateSmoothPath } from "../annotationUtils"
 import "./AnnotationLayer.css"
 
 const STICKY_COLORS = [
@@ -156,17 +156,20 @@ const ArrowPorts: React.FC = () => {
   return (
     <>
       {panelList.map(([id, p]) => {
+        const h = p.minimized ? 34 : p.height
         const ports = [
           { anchor: 'top',    x: p.x + p.width / 2, y: p.y, pos: 0.5 },
-          { anchor: 'bottom', x: p.x + p.width / 2, y: p.y + p.height, pos: 0.5 },
-          { anchor: 'left',   x: p.x, y: p.y + p.height / 2, pos: 0.5 },
-          { anchor: 'right',  x: p.x + p.width, y: p.y + p.height / 2, pos: 0.5 },
+          { anchor: 'bottom', x: p.x + p.width / 2, y: p.y + h, pos: 0.5 },
+          { anchor: 'left',   x: p.x, y: p.y + h / 2, pos: 0.5 },
+          { anchor: 'right',  x: p.x + p.width, y: p.y + h / 2, pos: 0.5 },
         ]
         return (
           <g key={id}>
             {ports.map(pt => (
               <g key={pt.anchor}>
                 <circle
+                  data-port-panel-id={id}
+                  data-port-anchor={pt.anchor}
                   cx={pt.x} cy={pt.y} r={PORT_RADIUS}
                   fill="#4dabe8" fillOpacity={0.85}
                   stroke="#fff" strokeWidth={1.5}
@@ -174,6 +177,8 @@ const ArrowPorts: React.FC = () => {
                   onMouseDown={onPortDown(id, pt.anchor, pt.pos)}
                 />
                 <circle
+                  data-port-panel-id={id}
+                  data-port-anchor={pt.anchor}
                   cx={pt.x} cy={pt.y} r={PORT_RADIUS + 3}
                   fill="transparent"
                   style={{ pointerEvents: 'auto', cursor: 'crosshair' }}
@@ -192,7 +197,7 @@ const RelationshipLine: React.FC<{
 	annotation: Annotation
 	panels: Record<
 		string,
-		{ x: number; y: number; width: number; height: number; detached?: boolean }
+		{ id: string; x: number; y: number; width: number; height: number; type: 'terminal' | 'editor' | 'browser' | 'region'; minimized?: boolean; detached?: boolean }
 	>
 	onDelete: () => void
 }> = ({ annotation: a, panels, onDelete }) => {
@@ -205,11 +210,14 @@ const RelationshipLine: React.FC<{
 	const tgtPt = getAnchorPoint(tgt, a.targetAnchor || "center", a.targetEdgePos ?? 0.5)
 	const broken = a.broken || src.detached || tgt.detached
 
+	// Unify routing using the shared resolveConnectionRoute to route around panels
+	const route = resolveConnectionRoute(a, panels)
+	const pathD = a.curved === false
+		? generateStraightPath(route)
+		: generateSmoothPath(route, 0.22)
+
 	const midX = (srcPt.x + tgtPt.x) / 2
 	const midY = (srcPt.y + tgtPt.y) / 2
-	const pathD = a.curved === false
-		? `M ${srcPt.x} ${srcPt.y} L ${tgtPt.x} ${tgtPt.y}`
-		: generateWigglyPath(srcPt.x, srcPt.y, tgtPt.x, tgtPt.y)
 
 	return (
 		<g
@@ -234,6 +242,14 @@ const RelationshipLine: React.FC<{
 				</marker>
 			</defs>
 			<path
+				data-relationship-id={a.id}
+				data-source-panel-id={a.sourcePanelId}
+				data-target-panel-id={a.targetPanelId}
+				data-source-anchor={a.sourceAnchor || "center"}
+				data-target-anchor={a.targetAnchor || "center"}
+				data-source-edge-pos={a.sourceEdgePos ?? 0.5}
+				data-target-edge-pos={a.targetEdgePos ?? 0.5}
+				data-curved={a.curved !== false}
 				d={pathD}
 				fill="none"
 				stroke={broken ? "#6b7280" : a.color || "#6b7280"}
@@ -244,6 +260,7 @@ const RelationshipLine: React.FC<{
 			/>
 			{a.relationshipLabel && (
 				<text
+					data-relationship-label-id={a.id}
 					x={midX}
 					y={midY - 8}
 					textAnchor="middle"
@@ -760,4 +777,4 @@ const AnnotationNode: React.FC<{ annotation: Annotation }> = ({
 	)
 }
 
-export default AnnotationLayer
+export default React.memo(AnnotationLayer)

@@ -271,6 +271,9 @@ interface HistorySnapshot {
 
 const HISTORY_LIMIT = 80
 
+import { TerminalShellType, DefaultShellSetting } from '../types/terminalShells'
+export type { TerminalShellType, DefaultShellSetting }
+
 export interface WorkspaceState {
   panels: Record<string, Panel>
   selectedPanelIds: string[]
@@ -299,8 +302,13 @@ export interface WorkspaceState {
     browserHomeUrl: string
     browserLazyLoad: boolean
     doubleClickToCreate: 'none' | 'terminal' | 'editor' | 'browser'
+    autoFocusOnCreate: boolean
     defaultTerminalShell: string
+    defaultTerminalShellType: DefaultShellSetting
+    lastSpawnedShellType: TerminalShellType | null
+    skipShellSwitchConfirmation: boolean
     terminalScrollback: number
+    recentShellPaths: string[]
     panelHeaderDoubleClick: 'none' | 'minimize' | 'focus' | 'rename'
     defaultPanelWidthTerminal: number
     defaultPanelHeightTerminal: number
@@ -587,8 +595,13 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         browserHomeUrl: 'https://google.com',
         browserLazyLoad: false,
         doubleClickToCreate: 'none',
+        autoFocusOnCreate: true,
         defaultTerminalShell: '',
+        defaultTerminalShellType: 'remember_last',
+        lastSpawnedShellType: null,
+        skipShellSwitchConfirmation: false,
         terminalScrollback: 10000,
+        recentShellPaths: (typeof window !== 'undefined' && window.electronAPI?.envShell) ? [window.electronAPI.envShell] : [],
         panelHeaderDoubleClick: 'rename',
         defaultPanelWidthTerminal: 600,
         defaultPanelHeightTerminal: 400,
@@ -845,7 +858,27 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         if (next) window.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
         return { settingsOpen: next }
       }),
-      updatePrefs: (partial) => set((state) => ({ prefs: { ...state.prefs, ...partial } })),
+      updatePrefs: (partial) => set((state) => {
+        let recentShellPaths = partial.recentShellPaths !== undefined ? partial.recentShellPaths : (state.prefs.recentShellPaths || [])
+        let nextDefaultTerminalShell = partial.defaultTerminalShell
+        if (typeof partial.defaultTerminalShell === 'string' && partial.defaultTerminalShell.trim() !== '') {
+          let path = partial.defaultTerminalShell.trim()
+          if (path.length > 1 && (path.endsWith('/') || path.endsWith('\\'))) {
+            path = path.slice(0, -1)
+          }
+          nextDefaultTerminalShell = path
+          const filtered = recentShellPaths.filter(p => p !== path)
+          recentShellPaths = [path, ...filtered].slice(0, 8)
+        }
+        return {
+          prefs: {
+            ...state.prefs,
+            ...partial,
+            defaultTerminalShell: nextDefaultTerminalShell !== undefined ? nextDefaultTerminalShell : state.prefs.defaultTerminalShell,
+            recentShellPaths
+          }
+        }
+      }),
       requestRename: (id) => set({ renameRequestId: id }),
       setPanelFinderOpen: (open) => set({ panelFinderOpen: open }),
       toggleMinimap: () => set((state) => ({ minimapVisible: !state.minimapVisible })),

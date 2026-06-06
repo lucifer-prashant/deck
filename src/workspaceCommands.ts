@@ -71,7 +71,7 @@ const getSpawnPosition = (width: number, height: number) => {
   }
 }
 
-export const createPanelAtViewportCenter = (type: Panel['type']) => {
+export const createPanelAtViewportCenter = (type: Panel['type'], settings?: Record<string, any>) => {
   const defaults = getPanelDefaults(type)
   const position = getSpawnPosition(defaults.width, defaults.height)
   const id = `${type}-${Date.now()}`
@@ -81,11 +81,18 @@ export const createPanelAtViewportCenter = (type: Panel['type']) => {
     type,
     x: position.x,
     y: position.y,
-    ...defaults
+    ...defaults,
+    settings: settings || {}
   }
   const store = useWorkspaceStore.getState()
   store.addPanel(panel)
   store.selectPanel(id)
+
+  if (store.prefs.autoFocusOnCreate !== false) {
+    setTimeout(() => {
+      focusPanelById(id)
+    }, 50)
+  }
 }
 
 // Shared bounding-box computation used by both getPanelBounds and fitItemsToViewport.
@@ -106,6 +113,36 @@ export const getPanelBounds = (panels: Panel[]) => computeBounds(panels)
 
 export const flagSmoothViewport = () => {
   window.dispatchEvent(new CustomEvent('wts-smooth-viewport'))
+}
+
+export const focusPanelById = (id: string) => {
+  const store = useWorkspaceStore.getState()
+  const panel = store.panels[id]
+  if (!panel) return
+
+  flagSmoothViewport()
+  // Sidebar is a fixed overlay — when open, usable width shrinks.
+  const sidebarW = store.sidebarOpen ? 320 : 0
+  const padX = 40
+  // Dynamic vertical padding — accounts for chrome/status bar visibility.
+  const chromePad = store.chromeVisible ? 44 : 8
+  const statusPad = store.statusBarVisible ? 32 : 8
+  const availW = window.innerWidth - sidebarW - padX * 2
+  const availH = window.innerHeight - chromePad - statusPad
+
+  // Fit-zoom: panel fills the tighter dimension.
+  const zoomX = availW / Math.max(panel.width, 1)
+  const zoomY = availH / Math.max(panel.height, 1)
+  const zoom = Math.max(0.1, Math.min(3.0, Math.min(zoomX, zoomY)))
+
+  // Center in the usable area.
+  const cx = panel.x + panel.width / 2
+  const cy = panel.y + panel.height / 2
+  store.setViewport({
+    zoom,
+    x: sidebarW + padX + availW / 2 - cx * zoom,
+    y: chromePad + availH / 2 - cy * zoom,
+  })
 }
 
 export const fitPanelsToViewport = (panels: Panel[]) => {

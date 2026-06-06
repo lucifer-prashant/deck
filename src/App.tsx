@@ -176,7 +176,7 @@ function MainAppShell() {
       const isSystemLight = window.matchMedia('(prefers-color-scheme: light)').matches
       const color = baseColor || getGridFallbacks(isSystemLight)[useWorkspaceStore.getState().prefs.canvasGridStyle ?? 'none'] || (isSystemLight ? '#f5f6f8' : '#1f2024')
       
-      if (color.toLowerCase() === '#0d1117') {
+      if (color.toLowerCase() === '#1f2024' || color.toLowerCase() === '#0d1117') {
         const vars = [
           '--fg', '--fg-muted', '--panel-bg', '--panel-header-bg', '--panel-border',
           '--panel-title', '--chrome-bg', '--chrome-border', '--status-bg',

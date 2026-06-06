@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useWorkspaceStore, type Panel } from '../store/workspaceStore'
-import { executeWorkspaceCommand } from '../workspaceCommands'
+import { executeWorkspaceCommand, focusPanelById } from '../workspaceCommands'
 import { grid, masonry, golden, clusterByType, type LayoutStrategy } from '../layoutEngine'
 import './PanelContextMenu.css'
 
@@ -24,7 +24,7 @@ const CanvasContextMenu: React.FC<Props> = ({ x, y, worldX, worldY, onClose }) =
   const menuRef = useRef<HTMLDivElement>(null)
   const [showNew, setShowNew] = useState(false)
   const [showArrange, setShowArrange] = useState(false)
-  const { addPanel, selectPanel, addAnnotation } = useWorkspaceStore()
+  const { addPanel, selectPanel, addAnnotation, prefs } = useWorkspaceStore()
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -52,6 +52,11 @@ const CanvasContextMenu: React.FC<Props> = ({ x, y, worldX, worldY, onClose }) =
       title: d.title, content: d.content
     })
     selectPanel(id)
+    if (prefs.autoFocusOnCreate !== false) {
+      setTimeout(() => {
+        focusPanelById(id)
+      }, 50)
+    }
     onClose()
   }
 

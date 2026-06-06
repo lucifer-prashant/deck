@@ -7,7 +7,7 @@ import { confirmPanelsDeletion } from '../panelDeletion'
 import AnnotationLayer from './AnnotationLayer'
 import DrawingCanvas from './DrawingCanvas'
 import AnnotateToolbar from './AnnotateToolbar'
-import { executeWorkspaceCommand, getPanelDefaults } from '../workspaceCommands'
+import { executeWorkspaceCommand, getPanelDefaults, focusPanelById } from '../workspaceCommands'
 import './Canvas.css'
 
 const MIN_ZOOM = 0.1
@@ -34,25 +34,23 @@ const Canvas: React.FC = () => {
   const [selectionBox, setSelectionBox] = useState<null | { startX: number; startY: number; x: number; y: number; width: number; height: number }>(null)
   const [canvasCtxMenu, setCanvasCtxMenu] = useState<null | { x: number; y: number; worldX: number; worldY: number }>(null)
 
-  const {
-    panels,
-    selectedPanelIds,
-    viewport,
-    minimapVisible,
-    dragGuides,
-    selectPanel,
-    selectMultiple,
-    clearSelection,
-    setViewport,
-    setCursorWorldPos,
-    movePanel,
-    resizePanel,
-    deletePanel,
-    annotateMode,
-    annotateTool,
-    prefs,
-    addPanel
-  } = useWorkspaceStore()
+  const panels = useWorkspaceStore(s => s.panels)
+  const selectedPanelIds = useWorkspaceStore(s => s.selectedPanelIds)
+  const viewport = useWorkspaceStore(s => s.viewport)
+  const minimapVisible = useWorkspaceStore(s => s.minimapVisible)
+  const dragGuides = useWorkspaceStore(s => s.dragGuides)
+  const selectPanel = useWorkspaceStore(s => s.selectPanel)
+  const selectMultiple = useWorkspaceStore(s => s.selectMultiple)
+  const clearSelection = useWorkspaceStore(s => s.clearSelection)
+  const setViewport = useWorkspaceStore(s => s.setViewport)
+  const setCursorWorldPos = useWorkspaceStore(s => s.setCursorWorldPos)
+  const movePanel = useWorkspaceStore(s => s.movePanel)
+  const resizePanel = useWorkspaceStore(s => s.resizePanel)
+  const deletePanel = useWorkspaceStore(s => s.deletePanel)
+  const annotateMode = useWorkspaceStore(s => s.annotateMode)
+  const annotateTool = useWorkspaceStore(s => s.annotateTool)
+  const prefs = useWorkspaceStore(s => s.prefs)
+  const addPanel = useWorkspaceStore(s => s.addPanel)
 
   // Keep a mutable ref of the current viewport for IPC handler
   const viewportRef = useRef(viewport)
@@ -570,6 +568,18 @@ const Canvas: React.FC = () => {
   // Paste onto canvas — image or text, at cursor position.
   useEffect(() => {
     const handlePaste = async (e: ClipboardEvent) => {
+      const target = e.target as HTMLElement | null
+      const active = document.activeElement as HTMLElement | null
+      const isTextInput =
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target?.isContentEditable === true ||
+        active instanceof HTMLInputElement ||
+        active instanceof HTMLTextAreaElement ||
+        active?.isContentEditable === true
+
+      if (isTextInput) return
+
       const items = e.clipboardData?.items
       if (!items || items.length === 0) return
 
@@ -824,6 +834,12 @@ const Canvas: React.FC = () => {
         }
         addPanel(newPanel)
         selectPanel(id)
+
+        if (prefs.autoFocusOnCreate !== false) {
+          setTimeout(() => {
+            focusPanelById(id)
+          }, 50)
+        }
       }}
     >
       <div

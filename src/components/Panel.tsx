@@ -1,12 +1,15 @@
 import React, { useRef, useState, useCallback, useEffect } from 'react'
 import { flushSync } from 'react-dom'
 import { Panel as PanelType, useWorkspaceStore } from '../store/workspaceStore'
+import { TerminalShellType, ShellConfig, SHELL_CONFIGS, getShellOptions } from '../types/terminalShells'
+import ShellSwitchConfirmDialog from './ShellSwitchConfirmDialog'
 import { executeWorkspaceCommand } from '../workspaceCommands'
 import { confirmPanelsDeletion } from '../panelDeletion'
 import PanelContextMenu from './PanelContextMenu'
 import BrowserPanel from './BrowserPanel'
 import TerminalPanel from './TerminalPanel'
 import EditorPanel from './EditorPanel'
+import { getAnchorPoint, generateWigglyPath, resolveConnectionRoute, generateRoundedPath, generateStraightPath, generateSmoothPath } from '../annotationUtils'
 import './Panel.css'
 
 interface PanelProps {
@@ -132,6 +135,9 @@ const SleepPlaceholder: React.FC<{ panel: PanelType; onLoad: () => void }> = ({ 
 const Panel: React.FC<PanelProps> = ({ panel, isSelected, offscreen, annotateMode, embedded, onSelect, onMove, onResize }) => {
   const panelRef = useRef<HTMLDivElement>(null)
   const titleInputRef = useRef<HTMLInputElement>(null)
+  const shellSwitcherRef = useRef<HTMLDivElement>(null)
+  const [pillOpen, setPillOpen] = useState(false)
+  const [pendingShell, setPendingShell] = useState<(ShellConfig & { pathHint?: string }) | null>(null)
   const [isDragging, setIsDragging] = useState(false)
   const [isResizing, setIsResizing] = useState<ResizeDir | null>(null)
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 })
@@ -173,6 +179,104 @@ const Panel: React.FC<PanelProps> = ({ panel, isSelected, offscreen, annotateMod
   useEffect(() => {
     if (!renaming) setDraftTitle(panel.title)
   }, [panel.title, renaming])
+
+  useEffect(() => {
+    if (!pillOpen) return
+    const handler = (e: MouseEvent) => {
+      if (shellSwitcherRef.current && !shellSwitcherRef.current.contains(e.target as Node)) {
+        setPillOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [pillOpen])
+
+  const getPanelShellType = useCallback((): TerminalShellType | null => {
+    const shellPath = (panel.settings?.shellPath as string) || ''
+    if (shellPath in SHELL_CONFIGS) {
+      return shellPath as TerminalShellType
+    }
+    if (shellPath) {
+      return 'custom'
+    }
+    const defType = prefs.defaultTerminalShellType
+    if (defType && defType !== 'remember_last') {
+      return defType === 'custom' ? 'custom' : (defType as TerminalShellType)
+    }
+    const lastType = prefs.lastSpawnedShellType
+    if (lastType) {
+      return lastType
+    }
+    return null
+  }, [panel.settings?.shellPath, prefs.defaultTerminalShellType, prefs.lastSpawnedShellType])
+
+  const executeShellSwitch = useCallback((shellType: TerminalShellType, customPathOverride?: string) => {
+    window.electronAPI?.pty?.kill(panel.id)
+    let shellPath = ''
+    if (customPathOverride !== undefined) {
+      shellPath = customPathOverride
+    } else if (shellType === 'custom') {
+      const customPath = window.prompt("Enter custom shell executable path:", (panel.settings?.shellPath as string) || '')
+      if (customPath === null) return false
+      shellPath = customPath
+    } else {
+      shellPath = shellType
+    }
+
+    updatePanel(panel.id, {
+      settings: {
+        ...(panel.settings || {}),
+        shellPath
+      }
+    })
+
+    useWorkspaceStore.getState().updatePrefs({ lastSpawnedShellType: shellType })
+    return true
+  }, [panel.id, panel.settings, updatePanel])
+
+  const handleSelectShell = useCallback((toShellConfig: ShellConfig & { pathHint?: string }) => {
+    setPillOpen(false)
+    const activePath = (panel.settings?.shellPath as string) || (panel.settings?.resolvedShellPath as string) || prefs.defaultTerminalShell || ''
+    const isSame = toShellConfig.pathHint !== undefined
+      ? (toShellConfig.pathHint === activePath)
+      : (toShellConfig.type === getPanelShellType())
+
+    if (isSame) {
+      return // close and no-op
+    }
+
+    if (prefs.skipShellSwitchConfirmation) {
+      executeShellSwitch(toShellConfig.type, toShellConfig.pathHint)
+    } else {
+      setPendingShell(toShellConfig)
+    }
+  }, [panel.settings?.shellPath, panel.settings?.resolvedShellPath, prefs.defaultTerminalShell, getPanelShellType, prefs.skipShellSwitchConfirmation, executeShellSwitch])
+
+  const currentShellType = getPanelShellType()
+  const currentShellConfig = currentShellType ? SHELL_CONFIGS[currentShellType] : null
+  const pillIcon = currentShellConfig ? currentShellConfig.icon : 'ti ti-terminal-2'
+  const activeShellPath = (panel.settings?.shellPath as string) || (panel.settings?.resolvedShellPath as string) || prefs.defaultTerminalShell || ''
+  const displayLabel = (currentShellType && currentShellType !== 'custom')
+    ? SHELL_CONFIGS[currentShellType].label
+    : (activeShellPath
+        ? (activeShellPath.split(/[/\\]/).filter(Boolean).pop() || 'Terminal')
+        : 'Terminal')
+
+  const isWin = (window.electronAPI?.platform || 'linux') === 'win32'
+  const recentShellPaths = prefs.recentShellPaths || []
+  const canSwitch = isWin
+    ? getShellOptions('win32').length > 1
+    : recentShellPaths.length > 1
+
+  const dynamicFromShell = (currentShellType && currentShellType !== 'custom')
+    ? SHELL_CONFIGS[currentShellType]
+    : {
+        type: 'custom' as TerminalShellType,
+        label: activeShellPath.split(/[/\\]/).filter(Boolean).pop() || 'Terminal',
+        icon: 'ti ti-terminal-2',
+        windowsOnly: false,
+        defaultPath: activeShellPath
+      }
 
   useEffect(() => {
     if (renaming) {
@@ -387,8 +491,27 @@ const Panel: React.FC<PanelProps> = ({ panel, isSelected, offscreen, annotateMod
     let dragCommit: null | (() => void) = null
     let resizeCommit: null | (() => void) = null
 
+    // Cache DOM queries at drag start to avoid querySelectorAll layout thrashing at 60fps
+    let cachedPorts: SVGCircleElement[] = []
+    let cachedRelPaths: SVGPathElement[] = []
+    const cachedRelLabels = new Map<string, SVGTextElement>()
+    const cachedPanelEls = new Map<string, HTMLElement>()
+
+    if (isDragging) {
+      cachedPorts = Array.from(document.querySelectorAll<SVGCircleElement>('circle[data-port-panel-id]'))
+      cachedRelPaths = Array.from(document.querySelectorAll<SVGPathElement>('path[data-relationship-id]'))
+      document.querySelectorAll<SVGTextElement>('text[data-relationship-label-id]').forEach(el => {
+        const id = el.getAttribute('data-relationship-label-id')
+        if (id) cachedRelLabels.set(id, el)
+      })
+      initialPositions.current.forEach((_, id) => {
+        const el = document.querySelector(`.panel[data-panel-id="${id}"]`) as HTMLElement | null
+        if (el) cachedPanelEls.set(id, el)
+      })
+    }
+
     const setPanelTransform = (id: string, dxWorld: number, dyWorld: number) => {
-      const el = document.querySelector(`.panel[data-panel-id="${id}"]`) as HTMLElement | null
+      const el = cachedPanelEls.get(id) || document.querySelector(`.panel[data-panel-id="${id}"]`) as HTMLElement | null
       if (el) el.style.transform = `translate3d(${dxWorld}px, ${dyWorld}px, 0)`
     }
 
@@ -592,6 +715,114 @@ const Panel: React.FC<PanelProps> = ({ panel, isSelected, offscreen, annotateMod
             }
           }
         }
+
+        // Update any connecting relationship arrows in the DOM in real-time.
+        const currentPanels: Record<string, { id: string; x: number; y: number; width: number; height: number; type: 'terminal' | 'editor' | 'browser' | 'region'; minimized?: boolean }> = {}
+        const allPanels = useWorkspaceStore.getState().panels
+        Object.entries(allPanels).forEach(([id, p]) => {
+          currentPanels[id] = { id, x: p.x, y: p.y, width: p.width, height: p.height, type: p.type, minimized: p.minimized }
+        })
+        // Update positions for panels currently being dragged
+        if (isMulti && anchor) {
+          const dx = newX - anchor.x
+          const dy = newY - anchor.y
+          initial.forEach((pos, id) => {
+            if (currentPanels[id]) {
+              currentPanels[id].x = pos.x + dx
+              currentPanels[id].y = pos.y + dy
+            }
+          })
+        } else {
+          if (currentPanels[panel.id]) {
+            currentPanels[panel.id].x = newX
+            currentPanels[panel.id].y = newY
+          }
+        }
+
+        // Update port positions in the DOM in real-time
+        cachedPorts.forEach(circle => {
+          const pid = circle.getAttribute('data-port-panel-id')
+          if (!pid) return
+          // Only update ports of panels that are moving
+          const isMoving = isMulti ? initial.has(pid) : (pid === panel.id)
+          if (!isMoving) return
+
+          const anchor = circle.getAttribute('data-port-anchor')
+          if (!anchor) return
+          const p = currentPanels[pid]
+          if (p) {
+            const h = p.minimized ? 34 : p.height
+            let cx = p.x
+            let cy = p.y
+            if (anchor === 'top') {
+              cx = p.x + p.width / 2
+              cy = p.y
+            } else if (anchor === 'bottom') {
+              cx = p.x + p.width / 2
+              cy = p.y + h
+            } else if (anchor === 'left') {
+              cx = p.x
+              cy = p.y + h / 2
+            } else if (anchor === 'right') {
+              cx = p.x + p.width
+              cy = p.y + h / 2
+            }
+            circle.setAttribute('cx', String(cx))
+            circle.setAttribute('cy', String(cy))
+          }
+        })
+
+        // Find all relationship path elements in the DOM
+        cachedRelPaths.forEach(path => {
+          const srcId = path.getAttribute('data-source-panel-id')
+          const tgtId = path.getAttribute('data-target-panel-id')
+          if (!srcId || !tgtId) return
+
+          // Only recalculate if one of the connected panels is being dragged
+          const isSrcMoving = isMulti ? initial.has(srcId) : (srcId === panel.id)
+          const isTgtMoving = isMulti ? initial.has(tgtId) : (tgtId === panel.id)
+          if (!isSrcMoving && !isTgtMoving) return
+
+          const src = currentPanels[srcId]
+          const tgt = currentPanels[tgtId]
+          if (src && tgt) {
+            const sourceAnchor = path.getAttribute('data-source-anchor') || 'center'
+            const targetAnchor = path.getAttribute('data-target-anchor') || 'center'
+            const sourceEdgePos = parseFloat(path.getAttribute('data-source-edge-pos') || '0.5')
+            const targetEdgePos = parseFloat(path.getAttribute('data-target-edge-pos') || '0.5')
+            const curved = path.getAttribute('data-curved') === 'true'
+
+            // Mock the annotation for the routing algorithm
+            const tempAnnotation = {
+              sourcePanelId: srcId,
+              targetPanelId: tgtId,
+              sourceAnchor,
+              targetAnchor,
+              sourceEdgePos,
+              targetEdgePos,
+            }
+
+            const route = resolveConnectionRoute(tempAnnotation, currentPanels)
+            const pathD = curved === false
+              ? generateStraightPath(route)
+              : generateSmoothPath(route, 0.22)
+
+            path.setAttribute('d', pathD)
+
+            // Update relationship label position if it exists
+            const relId = path.getAttribute('data-relationship-id')
+            const textEl = cachedRelLabels.get(relId || '')
+            if (textEl) {
+              const srcPt = getAnchorPoint(src, sourceAnchor, sourceEdgePos)
+              const tgtPt = getAnchorPoint(tgt, targetAnchor, targetEdgePos)
+              const midX = (srcPt.x + tgtPt.x) / 2
+              const midY = (srcPt.y + tgtPt.y) / 2
+              textEl.setAttribute('x', String(midX))
+              textEl.setAttribute('y', String(midY - 8))
+            }
+          }
+        })
+        window.dispatchEvent(new CustomEvent('deck:panels-drag', { detail: currentPanels }))
       }
 
       if (isResizing) {
@@ -845,6 +1076,80 @@ const Panel: React.FC<PanelProps> = ({ panel, isSelected, offscreen, annotateMod
               }}
             />
           )}
+          {panel.type === 'terminal' && (
+            <div className="terminal-shell-switcher" ref={shellSwitcherRef}>
+              {canSwitch ? (
+                <button
+                  className="shell-switcher-pill"
+                  onClick={(e) => { e.stopPropagation(); setPillOpen(!pillOpen) }}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  title="Switch terminal shell"
+                >
+                  <i className={pillIcon} />
+                  <span>{displayLabel}</span>
+                  <span className="pill-arrow">▼</span>
+                </button>
+              ) : (
+                <div
+                  className="shell-switcher-pill"
+                  style={{ cursor: 'default' }}
+                  title="Terminal shell"
+                >
+                  <i className={pillIcon} />
+                  <span>{displayLabel}</span>
+                </div>
+              )}
+              
+              {canSwitch && pillOpen && (
+                <div className="shell-dropdown-menu">
+                  {isWin ? (
+                    getShellOptions('win32').map(option => (
+                      <button
+                        key={option.type}
+                        className={`shell-dropdown-item ${currentShellType === option.type ? 'active' : ''}`}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleSelectShell(option)
+                        }}
+                        onMouseDown={(e) => e.stopPropagation()}
+                      >
+                        <i className={option.icon} />
+                        <span>{option.label}</span>
+                      </button>
+                    ))
+                  ) : (
+                    recentShellPaths.map(path => {
+                      const label = path.split(/[/\\]/).filter(Boolean).pop() || 'Terminal'
+                      const activePath = (panel.settings?.shellPath as string) || (panel.settings?.resolvedShellPath as string) || prefs.defaultTerminalShell || ''
+                      const isActive = path === activePath
+                      return (
+                        <button
+                          key={path}
+                          className={`shell-dropdown-item ${isActive ? 'active' : ''}`}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleSelectShell({
+                              type: 'custom',
+                              label,
+                              icon: 'ti ti-terminal-2',
+                              windowsOnly: false,
+                              defaultPath: path,
+                              pathHint: path
+                            })
+                          }}
+                          onMouseDown={(e) => e.stopPropagation()}
+                          title={path}
+                        >
+                          <i className="ti ti-terminal-2" />
+                          <span>{label}</span>
+                        </button>
+                      )
+                    })
+                  )}
+                </div>
+              )}
+            </div>
+          )}
           {renaming ? (
             <input
               ref={titleInputRef}
@@ -949,6 +1254,26 @@ const Panel: React.FC<PanelProps> = ({ panel, isSelected, offscreen, annotateMod
             onMouseDown={handleResizeMouseDown(dir)}
           />
         ))}
+        {pendingShell && (
+          <ShellSwitchConfirmDialog
+            fromShell={dynamicFromShell}
+            toShell={pendingShell}
+            onConfirm={() => {
+              if (executeShellSwitch(pendingShell.type, pendingShell.pathHint)) {
+                setPendingShell(null)
+              }
+            }}
+            onCancel={() => {
+              setPendingShell(null)
+            }}
+            onSkipFuture={() => {
+              useWorkspaceStore.getState().updatePrefs({ skipShellSwitchConfirmation: true })
+              if (executeShellSwitch(pendingShell.type, pendingShell.pathHint)) {
+                setPendingShell(null)
+              }
+            }}
+          />
+        )}
       </div>
       {ctxMenu && (
         <PanelContextMenu
