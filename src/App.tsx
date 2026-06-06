@@ -94,7 +94,7 @@ function MainAppShell() {
     const checkForUpdates = async () => {
       try {
         const currentVersion = await window.electronAPI.getAppVersion()
-        const response = await fetch('https://api.github.com/repos/lucifer-prashant/deck/releases/latest')
+        const response = await fetch(`https://api.github.com/repos/lucifer-prashant/deck/releases/latest?t=${Date.now()}`, { cache: 'no-store' })
         if (!response.ok) return
         const data = await response.json()
         const latestVersion = data.tag_name ? data.tag_name.replace(/^v/, '') : ''
