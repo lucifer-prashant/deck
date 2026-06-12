@@ -1307,16 +1307,14 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             const current = useWorkspaceStore.getState()
             const panelsChanged = JSON.stringify(data.panels) !== JSON.stringify(current.panels)
             const tabsChanged = JSON.stringify(data.tabs) !== JSON.stringify(current.tabs)
-            const activeTabChanged = data.activeTabId !== current.activeTabId
 
-            if (!panelsChanged && !tabsChanged && !activeTabChanged) {
+            if (!panelsChanged && !tabsChanged) {
               return // Break cross-window update loop
             }
 
             useWorkspaceStore.setState((state) => ({
               panels: data.panels ?? state.panels,
-              tabs: data.tabs ?? state.tabs,
-              activeTabId: data.activeTabId ?? state.activeTabId
+              tabs: data.tabs ?? state.tabs
             }))
           } catch { /* ignore parse error */ }
         }
@@ -2176,7 +2174,8 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           presetGraveyards: state.presetGraveyards,
           canvasPresets: state.canvasPresets,
           annotationsVisible: state.annotationsVisible,
-          viewportBookmarks: state.viewportBookmarks
+          viewportBookmarks: state.viewportBookmarks,
+          isExplicitEmpty: state.isExplicitEmpty
         }
       },
       // v2: scrub retired gold/amber colors. v3: force snapToGrid off. v4: add canvasPresets. v5: snapToGrid removed.

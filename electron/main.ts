@@ -365,12 +365,13 @@ function createWindow() {
 async function handleLocalFileRequest(req: Request): Promise<Response> {
   try {
     const referrer = req.referrer || req.headers.get('referer') || ''
-    if (referrer) {
-      const parsedRef = new URL(referrer)
-      const isRefLocal = parsedRef.hostname === 'localhost' || parsedRef.hostname === '127.0.0.1' || parsedRef.protocol === 'file:' || parsedRef.protocol === 'local-file:'
-      if (!isRefLocal) {
-        return new Response('Forbidden', { status: 403 })
-      }
+    if (!referrer) {
+      return new Response('Forbidden', { status: 403 })
+    }
+    const parsedRef = new URL(referrer)
+    const isRefLocal = parsedRef.hostname === 'localhost' || parsedRef.hostname === '127.0.0.1' || parsedRef.protocol === 'file:' || parsedRef.protocol === 'local-file:'
+    if (!isRefLocal) {
+      return new Response('Forbidden', { status: 403 })
     }
     
     let filepath = decodeURIComponent(req.url.replace('local-file://', ''))
@@ -1657,7 +1658,7 @@ ipcMain.handle('git:blame', async (_e, args: { repoRoot: string; path: string })
     }
     
     const parts = line.split(' ')
-    if (parts.length >= 4 && parts[0].length === 40) {
+    if (parts.length >= 3 && parts[0].length === 40) {
       const sha = parts[0]
       const finalLine = parseInt(parts[2], 10)
       

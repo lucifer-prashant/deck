@@ -805,32 +805,37 @@ const MonacoFallback: React.FC<{ panel: PanelType }> = ({ panel }) => {
 
     const styleRules: string[] = []
     const newDecorations: monacoNS.editor.IModelDeltaDecoration[] = []
+    const uniqueShas = new Set<string>()
 
     Object.entries(blameData).forEach(([lineStr, info]) => {
       const line = parseInt(lineStr, 10)
-      const label = `${info.commit} (${info.author.slice(0, 10)})`
+      const sha = info.commit
+      const label = `${sha} (${info.author.slice(0, 10)})`
       
-      styleRules.push(`
-        .blame-gutter-${line}::before {
-          content: ${JSON.stringify(label)};
-          color: rgba(255,255,255,0.35);
-          font-size: 10px;
-          font-family: monospace;
-          margin-right: 6px;
-          display: inline-block;
-          width: 80px;
-          text-align: right;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-        }
-      `)
+      if (!uniqueShas.has(sha)) {
+        uniqueShas.add(sha)
+        styleRules.push(`
+          .blame-sha-${sha}::before {
+            content: ${JSON.stringify(label)};
+            color: rgba(255,255,255,0.35);
+            font-size: 10px;
+            font-family: monospace;
+            margin-right: 6px;
+            display: inline-block;
+            width: 80px;
+            text-align: right;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+          }
+        `)
+      }
 
       newDecorations.push({
         range: new monacoRef.current!.Range(line, 1, line, 1),
         options: {
           isWholeLine: false,
-          marginClassName: `blame-gutter-item blame-gutter-${line}`,
+          marginClassName: `blame-gutter-item blame-sha-${sha}`,
           hoverMessage: {
             value: `**Commit:** ${info.commit}\n\n**Author:** ${info.author}\n\n**Date:** ${info.date}\n\n**Summary:** ${info.summary}`
           }
