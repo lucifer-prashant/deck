@@ -365,13 +365,20 @@ function createWindow() {
 async function handleLocalFileRequest(req: Request): Promise<Response> {
   try {
     const referrer = req.referrer || req.headers.get('referer') || ''
-    if (!referrer) {
-      return new Response('Forbidden', { status: 403 })
-    }
-    const parsedRef = new URL(referrer)
-    const isRefLocal = parsedRef.hostname === 'localhost' || parsedRef.hostname === '127.0.0.1' || parsedRef.protocol === 'file:' || parsedRef.protocol === 'local-file:'
-    if (!isRefLocal) {
-      return new Response('Forbidden', { status: 403 })
+    const secFetchMode = req.headers.get('sec-fetch-mode') || ''
+    
+    if (referrer) {
+      const parsedRef = new URL(referrer)
+      const isRefLocal = parsedRef.hostname === 'localhost' || parsedRef.hostname === '127.0.0.1' || parsedRef.protocol === 'file:' || parsedRef.protocol === 'local-file:'
+      if (!isRefLocal) {
+        return new Response('Forbidden', { status: 403 })
+      }
+    } else {
+      // Allow only navigation requests (like initial webview/iframe page loads) to proceed without a referrer.
+      // Subresource fetches (fetch, xhr, img, etc.) initiated by remote origins must fail closed.
+      if (secFetchMode !== 'navigate') {
+        return new Response('Forbidden', { status: 403 })
+      }
     }
     
     let filepath = decodeURIComponent(req.url.replace('local-file://', ''))
