@@ -1,7 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { useWorkspaceStore } from '../store/workspaceStore'
-import { TerminalShellType, SHELL_CONFIGS, getShellOptions } from '../types/terminalShells'
-import { executeWorkspaceCommand, createPanelAtViewportCenter } from '../workspaceCommands'
+import { executeWorkspaceCommand } from '../workspaceCommands'
 import TabContextMenu from './TabContextMenu'
 import './WorkspaceChrome.css'
 
@@ -28,61 +27,12 @@ const WorkspaceChrome: React.FC = () => {
   const overwriteCanvasPreset = useWorkspaceStore(s => s.overwriteCanvasPreset)
   const saveCanvasPreset = useWorkspaceStore(s => s.saveCanvasPreset)
   const saveBuiltinPreset = useWorkspaceStore(s => s.saveBuiltinPreset)
-  const prefs = useWorkspaceStore(s => s.prefs)
   const markTabSaved = useWorkspaceStore(s => s.markTabSaved)
   const zoom = useWorkspaceStore(s => s.viewport.zoom)
 
 
-  const [showTermDropdown, setShowTermDropdown] = useState(false)
-  const terminalBtnRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
-    if (!showTermDropdown) return
-    const handler = (e: MouseEvent) => {
-      if (terminalBtnRef.current && !terminalBtnRef.current.contains(e.target as Node)) {
-        setShowTermDropdown(false)
-      }
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [showTermDropdown])
 
-  const handleCreateTerminal = (shellType: TerminalShellType) => {
-    let shellPath = ''
-    if (shellType === 'custom') {
-      const customPath = window.prompt("Enter custom shell executable path:", prefs.defaultTerminalShell || '')
-      if (!customPath) return
-      shellPath = customPath
-    } else {
-      shellPath = shellType
-    }
-    createPanelAtViewportCenter('terminal', { shellPath })
-  }
-
-  const handleMainCreateTerminal = () => {
-    let resolvedShellType: TerminalShellType = 'powershell'
-
-    const defType = prefs.defaultTerminalShellType
-    if (defType && defType !== 'remember_last') {
-      resolvedShellType = defType as TerminalShellType
-    } else {
-      resolvedShellType = prefs.lastSpawnedShellType ?? 'powershell'
-    }
-
-    let shellPath = ''
-    if (resolvedShellType === 'custom') {
-      shellPath = prefs.defaultTerminalShell || ''
-      if (!shellPath) {
-        const customPath = window.prompt("Enter custom shell executable path:")
-        if (!customPath) return
-        shellPath = customPath
-      }
-    } else {
-      shellPath = resolvedShellType
-    }
-
-    createPanelAtViewportCenter('terminal', { shellPath })
-  }
 
   const [renamingTabId, setRenamingTabId] = useState<string | null>(null)
   const [tabDraft, setTabDraft] = useState('')
@@ -313,65 +263,28 @@ const WorkspaceChrome: React.FC = () => {
         <button className="workspace-tab add" onClick={() => createTab()} title="New canvas tab">+</button>
         <div className="workspace-spacer" />
 
-        <div className="chrome-split-btn" ref={terminalBtnRef}>
-          <button
-            className="chrome-chip"
-            onClick={handleMainCreateTerminal}
-            title="Spawn Terminal (Ctrl+T)"
-          >
-            + Terminal
-          </button>
-          <button
-            className="chrome-chip split-arrow"
-            onClick={(e) => { e.stopPropagation(); setShowTermDropdown(!showTermDropdown) }}
-            title="Select Terminal Shell Preset"
-          >
-            ▼
-          </button>
-          {showTermDropdown && (
-            <div className="chrome-split-dropdown">
-              {prefs.lastSpawnedShellType && SHELL_CONFIGS[prefs.lastSpawnedShellType] && (
-                <>
-                  <div className="split-dropdown-header">Recent</div>
-                  <button
-                    className="split-dropdown-item"
-                    onClick={() => {
-                      setShowTermDropdown(false)
-                      handleCreateTerminal(prefs.lastSpawnedShellType!)
-                    }}
-                  >
-                    <i className={SHELL_CONFIGS[prefs.lastSpawnedShellType].icon} />
-                    <span>{SHELL_CONFIGS[prefs.lastSpawnedShellType].label}</span>
-                    <span className="split-dropdown-recent-badge">recent</span>
-                  </button>
-                  <div className="split-dropdown-separator" />
-                </>
-              )}
 
-              <div className="split-dropdown-header">All Shells</div>
-              {getShellOptions(window.electronAPI?.platform || 'linux').map(option => (
-                <button
-                  key={option.type}
-                  className="split-dropdown-item"
-                  onClick={() => {
-                    setShowTermDropdown(false)
-                    handleCreateTerminal(option.type)
-                  }}
-                >
-                  <i className={option.icon} />
-                  <span>{option.label}</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
 
         <button className="chrome-chip" onClick={toggleCommandPalette} title="Command palette (Ctrl+P)">⌘ P</button>
         <button className="chrome-chip" onClick={() => executeWorkspaceCommand('fit-all')} title="Fit all panels">Fit</button>
         <button className={`chrome-chip ${minimapVisible ? 'active' : ''}`} onClick={() => executeWorkspaceCommand('toggle-minimap')}>Map</button>
         <div className="workspace-tab-divider" />
-        <button className="chrome-chip ghost" onClick={handleImportClick} title="Import workspace JSON">⬆</button>
-        <button className="chrome-chip ghost" onClick={handleExport} title="Export workspace JSON">⬇</button>
+        <button
+          className="chrome-chip ghost"
+          onClick={handleImportClick}
+          title="Import workspace JSON"
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+        >
+          <i className="ti ti-upload" style={{ fontSize: 13 }} />
+        </button>
+        <button
+          className="chrome-chip ghost"
+          onClick={handleExport}
+          title="Export workspace JSON"
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+        >
+          <i className="ti ti-download" style={{ fontSize: 13 }} />
+        </button>
         <input ref={fileInputRef} type="file" accept="application/json" style={{ display: 'none' }} onChange={handleImportFile} />
         <button
           className="chrome-chip ghost"

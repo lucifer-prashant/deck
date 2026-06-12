@@ -12,7 +12,7 @@ interface ShellInfo {
 
 export const WorkspaceWizard: React.FC = () => {
   const { prefs, updatePrefs, addPanel, selectPanel } = useWorkspaceStore()
-  const wizardStep = prefs.wizardStep
+  const wizardStep = typeof prefs.wizardStep === 'number' ? prefs.wizardStep : 0
 
   const [detectedShells, setDetectedShells] = useState<ShellInfo[]>([])
   const [loadingShells, setLoadingShells] = useState(true)

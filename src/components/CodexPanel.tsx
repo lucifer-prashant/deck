@@ -688,7 +688,7 @@ export const CodexPanel: React.FC = () => {
                     <ShortcutChip command="toggle-sidebar" fallback="ctrl+shift+b" />
                   </div>
                   <div className="codex-kb-row">
-                    <span className="codex-kb-label">Toggle Top/Bottom Chrome Bars</span>
+                    <span className="codex-kb-label">Toggle Canvas Status Bars</span>
                     <ShortcutChip command="toggle-bars" fallback="ctrl+\\" />
                   </div>
                   <div className="codex-kb-row">

@@ -2167,6 +2167,17 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           }
         }
         return data as WorkspaceState
+      },
+      merge: (persistedState: unknown, currentState: WorkspaceState) => {
+        const persisted = persistedState as Partial<WorkspaceState> | null
+        return {
+          ...currentState,
+          ...persisted,
+          prefs: {
+            ...currentState.prefs,
+            ...(persisted?.prefs || {})
+          }
+        } as WorkspaceState
       }
     }
   )

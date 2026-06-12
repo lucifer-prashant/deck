@@ -22,7 +22,7 @@ const COMMANDS_META: Array<{ id: string; label: string; description: string }> =
   { id: 'toggle-settings', label: 'Open Preferences', description: 'Show preferences overlay' },
   { id: 'toggle-minimap', label: 'Toggle Minimap', description: 'Show/hide world minimap' },
   { id: 'toggle-annotate-mode', label: 'Toggle Annotate Mode', description: 'Toggle pen/eraser canvas overlay' },
-  { id: 'toggle-bars', label: 'Toggle Chrome Bars', description: 'Show/hide header and status bar' },
+  { id: 'toggle-bars', label: 'Toggle Canvas Status Bars', description: 'Show/hide header and status bar' },
   { id: 'cycle-theme', label: 'Cycle Workspace Theme', description: 'Cycle through dark, light, midnight' },
   { id: 'arrange-selected', label: 'Arrange Selected Panels', description: 'Grid/Align selected panels' },
   { id: 'find-scratchpad', label: 'Toggle Scratchpad Note', description: 'Quickly open scratchpad note panel' },
