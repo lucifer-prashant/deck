@@ -50,11 +50,45 @@ function App() {
   const popoutId = new URLSearchParams(window.location.search).get('popout')
   if (popoutId) return <PopoutWindow panelId={popoutId} />
 
-  return <MainAppShell />
+  // Detect popout tab mode via URL query: ?popoutTab=<tabId>
+  const popoutTabId = new URLSearchParams(window.location.search).get('popoutTab')
+
+  return <MainAppShell popoutTabId={popoutTabId || undefined} />
 }
 
-function MainAppShell() {
+function MainAppShell({ popoutTabId }: { popoutTabId?: string } = {}) {
   useKeyboardShortcuts()
+
+  // Setup/cleanup for popout tab window
+  useEffect(() => {
+    if (!popoutTabId) return
+
+    const store = useWorkspaceStore.getState()
+    if (store.activeTabId !== popoutTabId) {
+      store.switchTab(popoutTabId)
+    }
+
+    // Force activeTabId to remain locked to popoutTabId in this window
+    const unsub = useWorkspaceStore.subscribe((state) => {
+      if (state.activeTabId !== popoutTabId) {
+        useWorkspaceStore.getState().switchTab(popoutTabId)
+      }
+    })
+
+    const flush = () => {
+      const s = useWorkspaceStore.getState()
+      const nextTabs = s.tabs.map(t => t.id === popoutTabId ? { ...t, detached: false } : t)
+      useWorkspaceStore.setState({ tabs: nextTabs }, false)
+      s.setTabDetached(popoutTabId, false)
+    }
+    const off = window.electronAPI?.window?.onPopoutFlush?.(flush)
+    window.addEventListener('beforeunload', flush)
+    return () => {
+      unsub()
+      off?.()
+      window.removeEventListener('beforeunload', flush)
+    }
+  }, [popoutTabId])
 
   const initialize = useWorkspaceStore(s => s.initialize)
   const commandPaletteOpen = useWorkspaceStore(s => s.commandPaletteOpen)
@@ -361,28 +395,40 @@ function MainAppShell() {
 
   // Sync panel.detached when popout windows open/close in main process.
   useEffect(() => {
-    const offD = window.electronAPI?.window?.onPanelDetached?.((panelId) => {
+    const offD = window.electronAPI?.window?.onPanelDetached?.(async (panelId) => {
       useWorkspaceStore.getState().updatePanel(panelId, { detached: true }, { skipHistory: true })
     })
     const offR = window.electronAPI?.window?.onPanelRedocked?.(async (panelId) => {
-      // Before re-rendering the panel on main canvas, pull in any updates the
-      // pop-out window wrote to localStorage just before closing. Without this
-      // step the storage event may arrive after we re-mount, so the panel
-      // (browser url, note content, editor file path) renders with stale state.
       try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        // Trigger a synchronous persist load so we see whatever they changed in the pop-out
         const persist = (useWorkspaceStore as any).persist
         if (persist?.rehydrate) await persist.rehydrate()
       } catch { /* ignore */ }
       useWorkspaceStore.getState().updatePanel(panelId, { detached: false }, { skipHistory: true })
     })
-    return () => { offD?.(); offR?.() }
+
+    // Sync tab.detached when popout windows open/close
+    const offTabD = window.electronAPI?.window?.onTabDetached?.(async (tabId) => {
+      useWorkspaceStore.getState().setTabDetached(tabId, true)
+    })
+    const offTabR = window.electronAPI?.window?.onTabRedocked?.(async (tabId) => {
+      try {
+        const persist = (useWorkspaceStore as any).persist
+        if (persist?.rehydrate) await persist.rehydrate()
+      } catch { /* ignore */ }
+      useWorkspaceStore.getState().setTabDetached(tabId, false)
+    })
+
+    return () => { offD?.(); offR?.(); offTabD?.(); offTabR?.() }
   }, [])
 
   const isEmpty = useWorkspaceStore(s => {
     const tab = s.tabs.find(t => t.id === s.activeTabId)
     return Object.keys(s.panels).length === 0 && (!tab?.annotations || tab.annotations.length === 0)
   })
+
+  const activeTab = useWorkspaceStore(s => s.tabs.find(t => t.id === s.activeTabId))
+  const isDetached = !!activeTab?.detached && popoutTabId !== activeTab.id
 
   return (
     <div className={`app ${chromeVisible ? 'has-chrome' : ''} ${statusBarVisible ? 'has-statusbar' : ''}`}>
@@ -413,7 +459,11 @@ function MainAppShell() {
           </div>
         </div>
       )}
-      {chromeVisible && <WorkspaceChrome />}
+      {popoutTabId && activeTab ? (
+        chromeVisible && <PopoutHeader tabId={popoutTabId} title={activeTab.title} />
+      ) : (
+        chromeVisible && <WorkspaceChrome />
+      )}
       {!chromeVisible && (
         <button
           className="chrome-peek"
@@ -423,8 +473,12 @@ function MainAppShell() {
       )}
       <StatusBarPeek />
 
-      <Sidebar />
-      <AppCanvas />
+      {!popoutTabId && <Sidebar />}
+      {isDetached && activeTab ? (
+        <DetachedOverlay tabId={activeTab.id} title={activeTab.title} />
+      ) : (
+        <AppCanvas />
+      )}
       {isEmpty && <EmptyState />}
       <StatusBar />
       {commandPaletteOpen && <CommandPalette />}
@@ -459,6 +513,145 @@ const StatusBarPeek: React.FC = () => {
       onClick={toggleStatusBar}
       title="Show status bar (Ctrl+\)"
     >▴</button>
+  )
+}
+
+const PopoutHeader: React.FC<{ tabId: string; title: string }> = ({ tabId, title }) => {
+  const redock = () => {
+    window.electronAPI?.window?.redockTab(tabId)
+  }
+
+  return (
+    <div style={{
+      position: 'fixed',
+      top: 10,
+      left: '50%',
+      transform: 'translateX(-50%)',
+      zIndex: 6000,
+      width: 'min(1280px, calc(100vw - 20px))',
+      height: 44,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      padding: '0 16px',
+      border: '1px solid var(--chrome-border, rgba(255, 255, 255, 0.08))',
+      borderRadius: 12,
+      background: 'var(--chrome-bg, rgba(22, 24, 28, 0.78))',
+      boxShadow: '0 10px 30px rgba(0, 0, 0, 0.32), 0 1px 0 rgba(255,255,255,0.04) inset',
+      backdropFilter: 'blur(12px) saturate(140%)',
+      WebkitBackdropFilter: 'blur(12px) saturate(140%)',
+      fontFamily: 'system-ui, -apple-system, sans-serif',
+      color: '#fff'
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <span style={{ fontSize: 16 }}>🖥️</span>
+        <span style={{ fontWeight: 600, fontSize: 13, color: 'rgba(255, 255, 255, 0.9)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 400 }}>
+          {title}
+        </span>
+        <span style={{
+          fontSize: 10,
+          background: 'rgba(77, 171, 232, 0.15)',
+          color: '#4dabe8',
+          border: '1px solid rgba(77, 171, 232, 0.3)',
+          borderRadius: 4,
+          padding: '1px 6px',
+          fontWeight: 600,
+          textTransform: 'uppercase',
+          letterSpacing: '0.5px',
+          whiteSpace: 'nowrap'
+        }}>
+          Detached Canvas
+        </span>
+      </div>
+      
+      <button
+        onClick={redock}
+        style={{
+          background: 'rgba(77, 171, 232, 0.15)',
+          color: '#4dabe8',
+          border: '1px solid rgba(77, 171, 232, 0.3)',
+          borderRadius: 6,
+          padding: '4px 12px',
+          fontSize: 11.5,
+          fontWeight: 600,
+          cursor: 'pointer',
+          transition: 'all 0.2s',
+          fontFamily: 'system-ui, sans-serif'
+        }}
+        onMouseOver={(e) => {
+          e.currentTarget.style.background = '#4dabe8'
+          e.currentTarget.style.color = '#000'
+        }}
+        onMouseOut={(e) => {
+          e.currentTarget.style.background = 'rgba(77, 171, 232, 0.15)'
+          e.currentTarget.style.color = '#4dabe8'
+        }}
+      >
+        ↩ Re-dock Tab
+      </button>
+    </div>
+  )
+}
+
+const DetachedOverlay: React.FC<{ tabId: string; title: string }> = ({ tabId, title }) => {
+  const redock = () => {
+    window.electronAPI?.window?.redockTab(tabId)
+  }
+
+  return (
+    <div style={{
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      justifyContent: 'center',
+      background: 'rgba(18, 18, 18, 0.45)',
+      backdropFilter: 'blur(16px) saturate(180%)',
+      WebkitBackdropFilter: 'blur(16px) saturate(180%)',
+      zIndex: 900,
+      textAlign: 'center',
+      color: '#fff',
+      padding: 24,
+      fontFamily: 'system-ui, -apple-system, sans-serif'
+    }}>
+      <div style={{
+        background: 'rgba(255, 255, 255, 0.03)',
+        border: '1px solid rgba(255, 255, 255, 0.08)',
+        borderRadius: 12,
+        padding: '32px 40px',
+        maxWidth: 420,
+        boxShadow: '0 8px 32px 0 rgba(0, 0, 0, 0.37)'
+      }}>
+        <div style={{ fontSize: 48, marginBottom: 16 }}>🖥️</div>
+        <h2 style={{ margin: '0 0 12px 0', fontWeight: 600, fontSize: 20 }}>Canvas Detached</h2>
+        <p style={{ margin: '0 0 24px 0', fontSize: 13, color: 'rgba(255, 255, 255, 0.6)', lineHeight: 1.5 }}>
+          The canvas for <strong>{title}</strong> is currently open in a separate window.
+        </p>
+        <button
+          onClick={redock}
+          style={{
+            background: '#4dabe8',
+            color: '#000',
+            border: 'none',
+            borderRadius: 6,
+            padding: '8px 20px',
+            fontSize: 13,
+            fontWeight: 600,
+            cursor: 'pointer',
+            transition: 'background 0.2s',
+            boxShadow: '0 4px 12px rgba(77, 171, 232, 0.2)'
+          }}
+          onMouseOver={(e) => e.currentTarget.style.background = '#64bdfc'}
+          onMouseOut={(e) => e.currentTarget.style.background = '#4dabe8'}
+        >
+          ↩ Re-dock Tab
+        </button>
+      </div>
+    </div>
   )
 }
 

@@ -9,6 +9,7 @@ import PanelContextMenu from './PanelContextMenu'
 import BrowserPanel from './BrowserPanel'
 import TerminalPanel from './TerminalPanel'
 import EditorPanel from './EditorPanel'
+import { GitPanel } from './GitPanel'
 import { getAnchorPoint, resolveConnectionRoute, generateStraightPath, generateSmoothPath } from '../annotationUtils'
 import './Panel.css'
 
@@ -29,7 +30,8 @@ const TYPE_ICON: Record<PanelType['type'], string> = {
   terminal: '▶',
   editor: '✎',
   browser: '◐',
-  region: '▢'
+  region: '▢',
+  git: '⎇'
 }
 
 const healthTitle = (s: string) => {
@@ -727,7 +729,7 @@ const Panel: React.FC<PanelProps> = ({ panel, isSelected, offscreen, annotateMod
         }
 
         // Update any connecting relationship arrows in the DOM in real-time.
-        const currentPanels: Record<string, { id: string; x: number; y: number; width: number; height: number; type: 'terminal' | 'editor' | 'browser' | 'region'; minimized?: boolean }> = {}
+        const currentPanels: Record<string, { id: string; x: number; y: number; width: number; height: number; type: PanelType['type']; minimized?: boolean }> = {}
         const allPanels = useWorkspaceStore.getState().panels
         Object.entries(allPanels).forEach(([id, p]) => {
           currentPanels[id] = { id, x: p.x, y: p.y, width: p.width, height: p.height, type: p.type, minimized: p.minimized }
@@ -1026,6 +1028,12 @@ const Panel: React.FC<PanelProps> = ({ panel, isSelected, offscreen, annotateMod
         )
       case 'browser':
         return <BrowserPanel panel={panel} />
+      case 'git':
+        return (
+          <div className="panel-content git-content" onMouseDown={handleBodyMouseDown}>
+            <GitPanel panel={panel} />
+          </div>
+        )
       case 'region':
         if (lazyLoad) return <SleepPlaceholder panel={panel} onLoad={loadSleepingPanel} />
         return (

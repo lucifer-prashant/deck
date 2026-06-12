@@ -17,7 +17,8 @@ const TYPE_DEFAULTS: Record<Panel['type'], { width: number; height: number; titl
   terminal: { width: 600, height: 400, title: 'Terminal' },
   editor: { width: 600, height: 400, title: 'Editor' },
   browser: { width: 800, height: 600, title: 'Browser' },
-  region: { width: 800, height: 600, title: 'Region' }
+  region: { width: 800, height: 600, title: 'Region' },
+  git: { width: 700, height: 500, title: 'Git Log' }
 }
 
 const CanvasContextMenu: React.FC<Props> = ({ x, y, worldX, worldY, onClose }) => {
@@ -103,6 +104,7 @@ const CanvasContextMenu: React.FC<Props> = ({ x, y, worldX, worldY, onClose }) =
             <button className="ctx-item" onClick={createAt('editor')}><span>Editor</span><span className="ctx-kbd">Ctrl+E</span></button>
             <button className="ctx-item" onClick={createAt('browser')}><span>Browser</span></button>
             <button className="ctx-item" onClick={createAt('region')}><span>Region</span></button>
+            <button className="ctx-item" onClick={createAt('git')}><span>Git Log</span></button>
           </div>
         )}
       </div>

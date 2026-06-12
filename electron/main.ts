@@ -1,5 +1,5 @@
 import { app, BrowserWindow, Menu, ipcMain, dialog, shell, session, protocol, net as electronNet } from 'electron'
-import { join, basename, dirname } from 'path'
+import { join, basename, dirname, relative, normalize, isAbsolute } from 'path'
 import { homedir } from 'os'
 import { promises as fsp, existsSync, readFileSync, writeFileSync } from 'fs'
 import { spawn, ChildProcess } from 'child_process'
@@ -13,6 +13,23 @@ protocol.registerSchemesAsPrivileged([
   { scheme: 'deck-asset', privileges: { secure: true, standard: true, supportFetchAPI: true, corsEnabled: true } },
   { scheme: 'local-file', privileges: { secure: true, standard: true, supportFetchAPI: true, corsEnabled: true, stream: true } }
 ])
+
+function debounce<T extends (...args: any[]) => void>(fn: T, delay: number): (...args: Parameters<T>) => void {
+  let timeoutId: NodeJS.Timeout | null = null
+  return (...args: Parameters<T>) => {
+    if (timeoutId) {
+      clearTimeout(timeoutId)
+    }
+    timeoutId = setTimeout(() => {
+      fn(...args)
+    }, delay)
+  }
+}
+
+function isPathInside(childPath: string, parentPath: string): boolean {
+  const relation = relative(parentPath, childPath)
+  return !!relation && !relation.startsWith('..') && !isAbsolute(relation)
+}
 
 // ─── Single Instance Lock ───────────────────────────────────────────────────
 const gotTheLock = app.requestSingleInstanceLock()
@@ -51,11 +68,14 @@ const loadWindowState = (): WindowState => {
   return defaultState
 }
 
-const saveWindowState = (state: WindowState) => {
+const saveWindowState = async (state: WindowState) => {
   try {
-    writeFileSync(getWindowStatePath(), JSON.stringify(state), 'utf8')
+    await fsp.writeFile(getWindowStatePath(), JSON.stringify(state), 'utf8')
   } catch { /* ignore */ }
 }
+
+const debouncedSaveWindowState = debounce(saveWindowState, 500)
+
 
 // ─── Platform helpers ────────────────────────────────────────────────────────
 // IS_WIN / PATH_SEP are used throughout to gate Windows-specific behaviour.
@@ -98,11 +118,14 @@ if (process.platform === 'linux') {
 let mainWindow: BrowserWindow | null = null
 // panelId → BrowserWindow for popped-out panels.
 const popoutWindows = new Map<string, BrowserWindow>()
+// tabId → BrowserWindow for popped-out tabs.
+const popoutTabs = new Map<string, BrowserWindow>()
 
 const allWindows = (): BrowserWindow[] => {
   const out: BrowserWindow[] = []
   if (mainWindow && !mainWindow.isDestroyed()) out.push(mainWindow)
   popoutWindows.forEach(w => { if (!w.isDestroyed()) out.push(w) })
+  popoutTabs.forEach(w => { if (!w.isDestroyed()) out.push(w) })
   return out
 }
 const broadcast = (channel: string, payload: unknown) => {
@@ -255,7 +278,7 @@ function createWindow() {
     try {
       const bounds = mainWindow.getBounds()
       const isMax = mainWindow.isMaximized()
-      saveWindowState({
+      debouncedSaveWindowState({
         width: bounds.width,
         height: bounds.height,
         x: bounds.x,
@@ -338,12 +361,58 @@ function createWindow() {
   })
 }
 
+// Helper handlers for custom protocols
+async function handleLocalFileRequest(req: Request): Promise<Response> {
+  try {
+    const referrer = req.referrer || req.headers.get('referer') || ''
+    if (referrer) {
+      const parsedRef = new URL(referrer)
+      const isRefLocal = parsedRef.hostname === 'localhost' || parsedRef.hostname === '127.0.0.1' || parsedRef.protocol === 'file:' || parsedRef.protocol === 'local-file:'
+      if (!isRefLocal) {
+        return new Response('Forbidden', { status: 403 })
+      }
+    }
+    
+    let filepath = decodeURIComponent(req.url.replace('local-file://', ''))
+    if (process.platform === 'win32') {
+      if (filepath.startsWith('/')) {
+        filepath = filepath.slice(1)
+      }
+    } else {
+      if (!filepath.startsWith('/')) {
+        filepath = '/' + filepath
+      }
+    }
+    return await electronNet.fetch(`file://${filepath}`)
+  } catch {
+    return new Response('', { status: 404 })
+  }
+}
+
+async function handleDeckAssetRequest(req: Request): Promise<Response> {
+  try {
+    const filename = decodeURIComponent(req.url.replace('deck-asset://', ''))
+    const assetsDir = join(app.getPath('userData'), 'assets')
+    const filepath = join(assetsDir, filename)
+    const normalized = normalize(filepath)
+    
+    if (!isPathInside(normalized, assetsDir)) {
+      return new Response('Forbidden', { status: 403 })
+    }
+    
+    return await electronNet.fetch(`file://${normalized}`)
+  } catch {
+    return new Response('', { status: 404 })
+  }
+}
+
 // Spoof a vanilla Chrome user agent on every webview. WhatsApp Web, some Google flows,
 // and a handful of other sites block Electron's default UA (which contains "Electron"
 // and our app name). Use the correct platform string so sites don't serve wrong content.
+const chromeVersion = process.versions.chrome
 const CHROME_UA = IS_WIN
-  ? 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
-  : 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+  ? `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion} Safari/537.36`
+  : `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion} Safari/537.36`
 
 // Wire permissions + downloads + zoom + window-open for every webview that gets created.
 app.on('web-contents-created', (_evt, contents) => {
@@ -355,35 +424,11 @@ app.on('web-contents-created', (_evt, contents) => {
   // Register custom protocols on the custom webview session if not already registered.
   if (sess !== session.defaultSession) {
     try {
-      sess.protocol.handle('local-file', async (req) => {
-        try {
-          let filepath = decodeURIComponent(req.url.replace('local-file://', ''))
-          if (process.platform === 'win32') {
-            if (filepath.startsWith('/')) {
-              filepath = filepath.slice(1)
-            }
-          } else {
-            if (!filepath.startsWith('/')) {
-              filepath = '/' + filepath
-            }
-          }
-          return await electronNet.fetch(`file://${filepath}`)
-        } catch {
-          return new Response('', { status: 404 })
-        }
-      })
+      sess.protocol.handle('local-file', handleLocalFileRequest)
     } catch { /* ignore */ }
 
     try {
-      sess.protocol.handle('deck-asset', async (req) => {
-        try {
-          const filename = req.url.replace('deck-asset://', '')
-          const filepath = join(app.getPath('userData'), 'assets', filename)
-          return await electronNet.fetch(`file://${filepath}`)
-        } catch {
-          return new Response('', { status: 404 })
-        }
-      })
+      sess.protocol.handle('deck-asset', handleDeckAssetRequest)
     } catch { /* ignore */ }
   }
 
@@ -396,7 +441,11 @@ app.on('web-contents-created', (_evt, contents) => {
       const isLocal = parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1' || parsed.protocol === 'file:'
 
       if (isLocal) {
-        return callback(true)
+        const storagePath = sess.getStoragePath()
+        const isCodeServerSession = !!(storagePath && storagePath.includes('wts-code-server'))
+        if (isCodeServerSession || permission === 'clipboard-write' || permission === 'fullscreen' || permission === 'pointerLock' || permission === 'notifications') {
+          return callback(true)
+        }
       }
 
       const allowedPermissions = ['clipboard-write', 'fullscreen', 'pointerLock', 'notifications']
@@ -416,7 +465,11 @@ app.on('web-contents-created', (_evt, contents) => {
       const isLocal = parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1' || parsed.protocol === 'file:'
 
       if (isLocal) {
-        return true
+        const storagePath = sess.getStoragePath()
+        const isCodeServerSession = !!(storagePath && storagePath.includes('wts-code-server'))
+        if (isCodeServerSession || permission === 'clipboard-write' || permission === 'fullscreen' || permission === 'pointerLock' || permission === 'notifications') {
+          return true
+        }
       }
 
       const allowedPermissions = ['clipboard-write', 'fullscreen', 'pointerLock', 'notifications']
@@ -430,39 +483,64 @@ app.on('web-contents-created', (_evt, contents) => {
   // — keeps Discord's start-screenshare flow one click without an OS picker.
   try {
     sess.setDisplayMediaRequestHandler((_req, callback) => {
-      // Picking the first screen source; for app-window picking we'd need to enumerate.
-      // dynamic import so dev builds without the screen API don't break.
-      import('electron').then(({ desktopCapturer }) => {
-        desktopCapturer.getSources({ types: ['screen'] }).then(sources => {
-          if (sources && sources.length > 0) {
-            callback({ video: sources[0], audio: 'loopback' })
-          } else {
-            callback({})
-          }
+      const parentWin = BrowserWindow.fromWebContents(contents) || mainWindow
+      dialog.showMessageBox(parentWin!, {
+        type: 'question',
+        buttons: ['Allow', 'Deny'],
+        defaultId: 1,
+        title: 'Screen Sharing Request',
+        message: 'An application is requesting to share your screen. Do you want to allow screen sharing?',
+        cancelId: 1
+      }).then(({ response }) => {
+        if (response !== 0) {
+          callback({}) // Denied
+          return
+        }
+        import('electron').then(({ desktopCapturer }) => {
+          desktopCapturer.getSources({ types: ['screen'] }).then(sources => {
+            if (sources && sources.length > 0) {
+              callback({ video: sources[0], audio: 'loopback' })
+            } else {
+              callback({})
+            }
+          }).catch(() => callback({}))
         }).catch(() => callback({}))
-      }).catch(() => callback({}))
+      })
     })
   } catch { /* older electron — falls back to default */ }
 
   // Downloads: prompt the user where to save, no auto-download, let Chromium handle the rest.
   sess.removeAllListeners('will-download')
-  sess.on('will-download', (_e, item) => {
+  sess.on('will-download', async (event, item, webContents) => {
+    item.pause()
     const filename = item.getFilename()
     const suggested = filename || 'download'
-    const chosen = dialog.showSaveDialogSync(mainWindow!, {
-      title: 'Save file',
-      defaultPath: suggested
-    })
-    if (!chosen) {
-      item.cancel()
-      return
-    }
-    item.setSavePath(chosen)
-    item.once('done', (_done, state) => {
-      if (state === 'completed') {
-        mainWindow?.webContents.send('download-finished', { path: chosen, filename: basename(chosen) })
+    const parentWin = BrowserWindow.fromWebContents(webContents) || mainWindow
+    
+    try {
+      const { canceled, filePath } = await dialog.showSaveDialog(parentWin!, {
+        title: 'Save file',
+        defaultPath: suggested
+      })
+      if (canceled || !filePath) {
+        item.cancel()
+        return
       }
-    })
+      item.setSavePath(filePath)
+      item.resume()
+      
+      item.once('done', (_done, state) => {
+        if (state === 'completed') {
+          const payload = { path: filePath, filename: basename(filePath) }
+          parentWin?.webContents.send('download-finished', payload)
+          if (parentWin !== mainWindow) {
+            mainWindow?.webContents.send('download-finished', payload)
+          }
+        }
+      })
+    } catch {
+      item.cancel()
+    }
   })
 
   // Block embedded auto-opening external apps; we want user control.
@@ -527,32 +605,8 @@ app.whenReady().then(async () => {
   try {
     await session.fromPartition('persist:wts-code-server').clearStorageData({ storages: ['serviceworkers', 'cookies'] })
   } catch { /* non-fatal */ }
-  protocol.handle('deck-asset', async (req) => {
-    try {
-      const filename = req.url.replace('deck-asset://', '')
-      const filepath = join(app.getPath('userData'), 'assets', filename)
-      return await electronNet.fetch(`file://${filepath}`)
-    } catch {
-      return new Response('', { status: 404 })
-    }
-  })
-  protocol.handle('local-file', async (req) => {
-    try {
-      let filepath = decodeURIComponent(req.url.replace('local-file://', ''))
-      if (process.platform === 'win32') {
-        if (filepath.startsWith('/')) {
-          filepath = filepath.slice(1)
-        }
-      } else {
-        if (!filepath.startsWith('/')) {
-          filepath = '/' + filepath
-        }
-      }
-      return await electronNet.fetch(`file://${filepath}`)
-    } catch {
-      return new Response('', { status: 404 })
-    }
-  })
+  protocol.handle('deck-asset', handleDeckAssetRequest)
+  protocol.handle('local-file', handleLocalFileRequest)
   // Set process icon for taskbar/app-switcher on Linux (BrowserWindow icon option
   // only affects the window chrome; app.setIcon covers the taskbar tile).
   if (process.platform === 'linux') {
@@ -1153,13 +1207,17 @@ ipcMain.handle('fs:import-as-asset', async (_e, filepath: string) => {
 })
 
 // ---- git status ----
-const runGit = (cwd: string, args: string[], timeoutMs = 5000): Promise<{ ok: boolean; stdout: string; stderr: string; code: number | null }> =>
+const runGit = (cwd: string, args: string[], timeoutMs = 5000, stdin?: string): Promise<{ ok: boolean; stdout: string; stderr: string; code: number | null }> =>
   new Promise(resolve => {
-    const proc = spawn('git', args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] })
+    const proc = spawn('git', args, { cwd, stdio: [stdin ? 'pipe' : 'ignore', 'pipe', 'pipe'] })
     let stdout = ''
     let stderr = ''
     proc.stdout.on('data', d => { stdout += d.toString() })
     proc.stderr.on('data', d => { stderr += d.toString() })
+    if (stdin && proc.stdin) {
+      proc.stdin.write(stdin)
+      proc.stdin.end()
+    }
     const t = setTimeout(() => { try { proc.kill() } catch { /* ignore */ } }, timeoutMs)
     proc.on('close', code => {
       clearTimeout(t)
@@ -1388,11 +1446,71 @@ ipcMain.handle('window:redock-panel', async (_e, panelId: string) => {
   return { ok: true }
 })
 
+const createPopoutTabWindow = (tabId: string) => {
+  if (popoutTabs.has(tabId)) {
+    const existing = popoutTabs.get(tabId)
+    if (existing && !existing.isDestroyed()) {
+      existing.focus()
+      return existing
+    }
+  }
+  const win = new BrowserWindow({
+    width: 1200,
+    height: 800,
+    minWidth: 400,
+    minHeight: 300,
+    show: false,
+    backgroundColor: '#1f2024',
+    webPreferences: {
+      preload: join(__dirname, 'preload.js'),
+      nodeIntegration: false,
+      contextIsolation: true,
+      devTools: enableDevTools,
+      webviewTag: true
+    },
+    title: 'Deck — Canvas',
+    icon: join(__dirname, '../build/icons/512x512.png')
+  })
+  const query = `?popoutTab=${encodeURIComponent(tabId)}`
+  if (isDev) win.loadURL('http://localhost:5173/' + query)
+  else win.loadFile(join(__dirname, '../dist/index.html'), { search: query.slice(1) })
+  win.once('ready-to-show', () => win.show())
+  win.on('closed', () => {
+    popoutTabs.delete(tabId)
+    // Notify all remaining windows so canvas re-shows/redocks.
+    broadcast('tab:redocked', { tabId })
+  })
+  popoutTabs.set(tabId, win)
+  return win
+}
+
+ipcMain.handle('window:popout-tab', async (_e, tabId: string) => {
+  if (!tabId) return { ok: false, error: 'no tabId' }
+  createPopoutTabWindow(tabId)
+  broadcast('tab:detached', { tabId })
+  return { ok: true }
+})
+
+ipcMain.handle('window:redock-tab', async (_e, tabId: string) => {
+  const w = popoutTabs.get(tabId)
+  if (w && !w.isDestroyed()) {
+    try {
+      w.webContents.send('popout:flush')
+      await new Promise(res => setTimeout(res, 80))  // grace period
+    } catch { /* ignore */ }
+    w.close()
+  }
+  return { ok: true }
+})
+
 ipcMain.handle('window:is-popout', async (e) => {
   const win = BrowserWindow.fromWebContents(e.sender)
   if (!win) return { popout: false }
   for (const [panelId, w] of popoutWindows.entries()) {
     if (w === win) return { popout: true, panelId }
+  }
+  for (const [tabId, w] of popoutTabs.entries()) {
+    if (w === win) return { popout: true, tabId }
   }
   return { popout: false }
 })
@@ -1483,14 +1601,109 @@ ipcMain.handle('git:diff', async (_e, args: { repoRoot: string; path?: string; s
 })
 
 ipcMain.handle('git:log', async (_e, args: { repoRoot: string; limit?: number }) => {
-  const lim = args.limit || 30
-  const r = await runGit(args.repoRoot, ['log', `--max-count=${lim}`, '--pretty=format:%h%x1f%s%x1f%an%x1f%ar%x1f%d'], 10000)
+  const lim = args.limit || 100
+  const r = await runGit(args.repoRoot, ['log', '--graph', `--max-count=${lim}`, '--pretty=format:%h%x1f%an%x1f%ar%x1f%s%x1f%d'], 10000)
   if (!r.ok) return { ok: false, error: r.stderr.trim() }
-  const commits = r.stdout.split('\n').filter(Boolean).map(line => {
-    const [sha, subject, author, date, refs] = line.split('\x1f')
-    return { sha, subject, author, date, refs: (refs || '').trim() }
+  const lines = r.stdout.split('\n')
+  const commits = lines.map(line => {
+    const parts = line.split('\x1f')
+    if (parts.length < 5) {
+      return { isGraphOnly: true, graph: line }
+    }
+    const graphAndHash = parts[0]
+    const lastSpaceIdx = graphAndHash.lastIndexOf(' ')
+    const hash = graphAndHash.slice(lastSpaceIdx + 1).trim()
+    const graph = graphAndHash.slice(0, lastSpaceIdx + 1)
+    
+    return {
+      isGraphOnly: false,
+      graph,
+      sha: hash,
+      author: parts[1],
+      date: parts[2],
+      subject: parts[3],
+      refs: (parts[4] || '').trim()
+    }
   })
   return { ok: true, commits }
+})
+
+ipcMain.handle('git:apply-patch', async (_e, args: { repoRoot: string; patch: string; reverse?: boolean }) => {
+  if (!args.repoRoot || !args.patch) return { ok: false, error: 'missing args' }
+  const gitArgs = ['apply', '--cached']
+  if (args.reverse) {
+    gitArgs.push('--reverse')
+  }
+  gitArgs.push('-')
+  const r = await runGit(args.repoRoot, gitArgs, 5000, args.patch)
+  return { ok: r.ok, error: r.ok ? undefined : r.stderr.trim() }
+})
+
+ipcMain.handle('git:blame', async (_e, args: { repoRoot: string; path: string }) => {
+  if (!args.repoRoot || !args.path) return { ok: false, error: 'missing args' }
+  const r = await runGit(args.repoRoot, ['blame', '--porcelain', args.path], 10000)
+  if (!r.ok) return { ok: false, error: r.stderr.trim() }
+  
+  const lines = r.stdout.split('\n')
+  const commits: Record<string, { author: string; summary: string; date: string }> = {}
+  const result: Record<number, { commit: string; author: string; summary: string; date: string }> = {}
+  
+  let i = 0
+  while (i < lines.length) {
+    const line = lines[i]
+    if (!line) {
+      i++
+      continue
+    }
+    
+    const parts = line.split(' ')
+    if (parts.length >= 4 && parts[0].length === 40) {
+      const sha = parts[0]
+      const finalLine = parseInt(parts[2], 10)
+      
+      if (!commits[sha]) {
+        commits[sha] = { author: 'Unknown', summary: 'No commit message', date: '' }
+        i++
+        while (i < lines.length) {
+          const sub = lines[i]
+          if (sub.startsWith('\t')) {
+            break
+          }
+          if (sub.startsWith('author ')) {
+            commits[sha].author = sub.slice(7)
+          } else if (sub.startsWith('author-time ')) {
+            const epoch = parseInt(sub.slice(12), 10)
+            if (!isNaN(epoch)) {
+              commits[sha].date = new Date(epoch * 1000).toLocaleDateString()
+            }
+          } else if (sub.startsWith('summary ')) {
+            commits[sha].summary = sub.slice(8)
+          }
+          i++
+        }
+      } else {
+        i++
+        while (i < lines.length && !lines[i].startsWith('\t')) {
+          i++
+        }
+      }
+      result[finalLine] = {
+        commit: sha.slice(0, 8),
+        author: commits[sha].author,
+        summary: commits[sha].summary,
+        date: commits[sha].date
+      }
+    } else {
+      i++
+    }
+  }
+  return { ok: true, blame: result }
+})
+
+ipcMain.handle('git:show', async (_e, args: { repoRoot: string; sha: string }) => {
+  if (!args.repoRoot || !args.sha) return { ok: false, error: 'missing args' }
+  const r = await runGit(args.repoRoot, ['show', '--no-color', '--stat', '-p', args.sha], 15000)
+  return { ok: r.ok, stdout: r.stdout, error: r.ok ? undefined : r.stderr.trim() }
 })
 
 ipcMain.handle('git:stash-list', async (_e, repoRoot: string) => {

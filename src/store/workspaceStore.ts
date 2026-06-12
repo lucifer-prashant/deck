@@ -25,6 +25,7 @@ const hasAnyContent = (value: string): boolean => {
   try {
     const parsed = JSON.parse(value)
     const state = parsed?.state
+    if (state?.isExplicitEmpty) return true
     const tabs: Array<{ panels?: Record<string, unknown> }> = state?.tabs ?? []
     const hasPanels = tabs.some(t => Object.keys(t.panels ?? {}).length > 0)
     const hasPresets = Object.keys(state?.canvasPresets ?? {}).length > 0
@@ -119,7 +120,7 @@ const dualStorage = {
 
 export interface Panel {
   id: string
-  type: 'terminal' | 'editor' | 'browser' | 'region'
+  type: 'terminal' | 'editor' | 'browser' | 'region' | 'git'
   x: number
   y: number
   width: number
@@ -241,6 +242,7 @@ export interface WorkspaceTab {
   // or when the user saves the current canvas via saveCanvasPreset. Used to overwrite
   // the preset on Ctrl+S / "Save" without prompting for a name again.
   linkedPresetId?: string
+  detached?: boolean
 }
 
 // Last-known state of preset panels the user has deleted. When the user re-runs
@@ -275,6 +277,7 @@ import { TerminalShellType, DefaultShellSetting } from '../types/terminalShells'
 export type { TerminalShellType, DefaultShellSetting }
 
 export interface WorkspaceState {
+  isExplicitEmpty?: boolean
   panels: Record<string, Panel>
   selectedPanelIds: string[]
   viewport: Viewport
@@ -301,7 +304,7 @@ export interface WorkspaceState {
     terminalFontFamily: string
     browserHomeUrl: string
     browserLazyLoad: boolean
-    doubleClickToCreate: 'none' | 'terminal' | 'editor' | 'browser'
+    doubleClickToCreate: 'none' | 'terminal' | 'editor' | 'browser' | 'git'
     autoFocusOnCreate: boolean
     autoFocusTerminal: boolean
     autoFocusEditor: boolean
@@ -426,6 +429,7 @@ export interface WorkspaceState {
   loadPreset: (name: 'life' | 'no-life') => void
   switchTab: (id: string) => void
   renameTab: (id: string, title: string) => void
+  setTabDetached: (id: string, detached: boolean) => void
   closeTab: (id: string) => void
   reorderTab: (fromId: string, toId: string) => void
   initialize: () => void
@@ -581,6 +585,7 @@ const snapshot = (state: WorkspaceState): HistorySnapshot => ({
 export const useWorkspaceStore = create<WorkspaceState>()(
   persist(
     (set, get) => ({
+      isExplicitEmpty: false,
       panels: initialTab.panels,
       selectedPanelIds: [],
       viewport: initialTab.viewport,
@@ -749,6 +754,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             past: [...state.past.slice(-HISTORY_LIMIT + 1), snapshot(state)],
             future: [],
             panels,
+            isExplicitEmpty: false,
             ...syncActiveTab(state, { panels })
           }
         }),
@@ -815,6 +821,16 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             presetGraveyards = { ...presetGraveyards, [presetName]: grave }
           }
 
+          const updatedTabs = state.tabs.map(tab => {
+            if (tab.id === state.activeTabId) {
+              return { ...tab, panels: newPanels }
+            }
+            return tab
+          })
+          const hasPanels = updatedTabs.some(t => Object.keys(t.panels ?? {}).length > 0)
+          const hasPresets = Object.keys(state.canvasPresets ?? {}).length > 0
+          const isExplicitEmpty = !hasPanels && !hasPresets
+
           return {
             past: [...state.past.slice(-HISTORY_LIMIT + 1), snapshot(state)],
             future: [],
@@ -824,6 +840,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             bodyActivePanelId,
             lastFocusedPanelId,
             presetGraveyards,
+            isExplicitEmpty,
             ...syncActiveTab(state, { panels: newPanels, selectedPanelIds })
           }
         }),
@@ -1130,7 +1147,8 @@ export const useWorkspaceStore = create<WorkspaceState>()(
               viewport: fitted,
               past: [],
               future: [],
-              presetGraveyards: { ...cur.presetGraveyards, [name]: newGraveyard }
+              presetGraveyards: { ...cur.presetGraveyards, [name]: newGraveyard },
+              isExplicitEmpty: false
             })
             return
           }
@@ -1180,7 +1198,8 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             selectedPanelIds: [],
             viewport: tab.viewport,
             past: [],
-            future: []
+            future: [],
+            isExplicitEmpty: false
           }))
         }).catch(err => {
           console.error('Failed to load presets module:', err)
@@ -1218,6 +1237,15 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           })
         })),
 
+      setTabDetached: (id, detached) =>
+        set((state) => ({
+          tabs: state.tabs.map(tab => {
+            if (tab.id !== id) return tab
+            if (tab.detached === detached) return tab
+            return { ...tab, detached, lastEditedAt: Date.now() }
+          })
+        })),
+
       reorderTab: (fromId, toId) =>
         set((state) => {
           if (fromId === toId) return state
@@ -1245,6 +1273,10 @@ export const useWorkspaceStore = create<WorkspaceState>()(
 
           // Clear any focus refs pointing at panels we just dropped.
           const stillExists = (pid: string | null) => !!(pid && activeTab.panels[pid])
+          const hasPanels = tabs.some(t => Object.keys(t.panels ?? {}).length > 0)
+          const hasPresets = Object.keys(state.canvasPresets ?? {}).length > 0
+          const isExplicitEmpty = !hasPanels && !hasPresets
+
           return {
             tabs,
             activeTabId: activeTab.id,
@@ -1255,7 +1287,8 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             headerActivePanelId: stillExists(state.headerActivePanelId) ? state.headerActivePanelId : null,
             bodyActivePanelId: stillExists(state.bodyActivePanelId) ? state.bodyActivePanelId : null,
             lastFocusedPanelId: stillExists(state.lastFocusedPanelId) ? state.lastFocusedPanelId : null,
-            presetGraveyards
+            presetGraveyards,
+            isExplicitEmpty
           }
         }),
 
@@ -1270,6 +1303,16 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             const parsed = JSON.parse(e.newValue)
             const data = parsed?.state || parsed
             if (!data) return
+
+            const current = useWorkspaceStore.getState()
+            const panelsChanged = JSON.stringify(data.panels) !== JSON.stringify(current.panels)
+            const tabsChanged = JSON.stringify(data.tabs) !== JSON.stringify(current.tabs)
+            const activeTabChanged = data.activeTabId !== current.activeTabId
+
+            if (!panelsChanged && !tabsChanged && !activeTabChanged) {
+              return // Break cross-window update loop
+            }
+
             useWorkspaceStore.setState((state) => ({
               panels: data.panels ?? state.panels,
               tabs: data.tabs ?? state.tabs,
@@ -1906,7 +1949,8 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           selectedPanelIds: [],
           viewport: tab.viewport,
           past: [],
-          future: []
+          future: [],
+          isExplicitEmpty: false
         }))
       },
 
@@ -2076,7 +2120,8 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             selectedPanelIds: [],
             viewport: active.viewport || { x: 0, y: 0, zoom: 1 },
             past: [],
-            future: []
+            future: [],
+            isExplicitEmpty: false
           })
           return true
         } catch {

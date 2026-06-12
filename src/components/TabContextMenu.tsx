@@ -138,6 +138,11 @@ const TabContextMenu: React.FC<Props> = ({ tabId, x, y, onRename, onClose }) => 
       <button className="ctx-item" onClick={wrap(duplicateTab)}>
         <span>Duplicate canvas</span>
       </button>
+      <button className="ctx-item" onClick={wrap(() => {
+        window.electronAPI?.window?.popoutTab(tabId)
+      })}>
+        <span>Pop out canvas</span>
+      </button>
       <button className="ctx-item" onClick={wrap(() => createTab())}>
         <span>New canvas</span>
       </button>

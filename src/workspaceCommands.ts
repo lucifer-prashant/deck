@@ -43,7 +43,8 @@ export const panelDefaults: Record<Panel['type'], Pick<Panel, 'width' | 'height'
   terminal: { width: 600, height: 400, title: 'Terminal' },
   editor: { width: 1100, height: 760, title: 'Editor' },
   browser: { width: 720, height: 560, title: 'Browser' },
-  region: { width: 800, height: 600, title: 'Region' }
+  region: { width: 800, height: 600, title: 'Region' },
+  git: { width: 700, height: 500, title: 'Git Log' }
 }
 
 export const getPanelDefaults = (type: Panel['type']) => {

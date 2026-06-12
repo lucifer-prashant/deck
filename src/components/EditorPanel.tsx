@@ -701,6 +701,160 @@ const MonacoFallback: React.FC<{ panel: PanelType }> = ({ panel }) => {
   const editorRef = useRef<monacoNS.editor.IStandaloneCodeEditor | null>(null)
   const lastSavedRef = useRef<string>(settings.content ?? '')
 
+  // Blame state and refs
+  const [blameActive, setBlameActive] = useState(false)
+  const [blameData, setBlameData] = useState<Record<number, { commit: string; author: string; summary: string; date: string }> | null>(null)
+  const [blameStyleText, setBlameStyleText] = useState('')
+  const [ghostStyleText, setGhostStyleText] = useState('')
+
+  const monacoRef = useRef<Monaco | null>(null)
+  const blameDecorationsRef = useRef<string[]>([])
+  const ghostDecorationsRef = useRef<string[]>([])
+
+  const blameActiveRef = useRef(blameActive)
+  const blameDataRef = useRef(blameData)
+  useEffect(() => { blameActiveRef.current = blameActive }, [blameActive])
+  useEffect(() => { blameDataRef.current = blameData }, [blameData])
+
+  const [resolvedRepoRoot, setResolvedRepoRoot] = useState<string>('')
+  const resolvedRepoRootRef = useRef(resolvedRepoRoot)
+  useEffect(() => { resolvedRepoRootRef.current = resolvedRepoRoot }, [resolvedRepoRoot])
+
+  useEffect(() => {
+    if (!filePath) {
+      setResolvedRepoRoot('')
+      return
+    }
+    let cancelled = false
+    const resolve = async () => {
+      const dir = await window.electronAPI?.file?.dirname?.(filePath)
+      if (cancelled) return
+      if (dir) {
+        const res = await window.electronAPI?.fs?.walkUp(dir, ['.git'])
+        if (cancelled) return
+        if (res?.ok && res.found) {
+          setResolvedRepoRoot(res.found)
+          return
+        }
+      }
+      setResolvedRepoRoot('')
+    }
+    resolve()
+    return () => { cancelled = true }
+  }, [filePath])
+
+  // Clear blame when filePath changes
+  useEffect(() => {
+    setBlameActive(false)
+    setBlameData(null)
+    setBlameStyleText('')
+    setGhostStyleText('')
+    if (editorRef.current) {
+      blameDecorationsRef.current = editorRef.current.deltaDecorations(blameDecorationsRef.current, [])
+      ghostDecorationsRef.current = editorRef.current.deltaDecorations(ghostDecorationsRef.current, [])
+      editorRef.current.updateOptions({ lineDecorationsWidth: 10 })
+    }
+  }, [filePath])
+
+  const updateActiveLineGhostText = useCallback((line: number) => {
+    if (!editorRef.current || !blameActiveRef.current || !blameDataRef.current || !monacoRef.current) return
+    const info = blameDataRef.current[line]
+    if (!info) {
+      ghostDecorationsRef.current = editorRef.current.deltaDecorations(ghostDecorationsRef.current, [])
+      setGhostStyleText('')
+      return
+    }
+    const ghostText = ` • ${info.author}, ${info.date} • ${info.summary}`
+    setGhostStyleText(`
+      .blame-active-ghost::after {
+        content: ${JSON.stringify(ghostText)};
+        color: rgba(255,255,255,0.35) !important;
+        font-size: 11.5px !important;
+        font-style: italic !important;
+      }
+    `)
+    const lineLength = editorRef.current.getModel()?.getLineLength(line) || 0
+    const decs = [
+      {
+        range: new monacoRef.current.Range(line, lineLength + 1, line, lineLength + 1),
+        options: {
+          isWholeLine: false,
+          afterContentClassName: 'blame-active-ghost'
+        }
+      }
+    ]
+    ghostDecorationsRef.current = editorRef.current.deltaDecorations(ghostDecorationsRef.current, decs)
+  }, [])
+
+  const updateActiveLineGhostTextRef = useRef(updateActiveLineGhostText)
+  useEffect(() => {
+    updateActiveLineGhostTextRef.current = updateActiveLineGhostText
+  }, [updateActiveLineGhostText])
+
+  useEffect(() => {
+    if (!editorRef.current || !monacoRef.current) return
+
+    if (!blameActive || !blameData) {
+      blameDecorationsRef.current = editorRef.current.deltaDecorations(blameDecorationsRef.current, [])
+      ghostDecorationsRef.current = editorRef.current.deltaDecorations(ghostDecorationsRef.current, [])
+      setBlameStyleText('')
+      setGhostStyleText('')
+      editorRef.current.updateOptions({ lineDecorationsWidth: 10 })
+      return
+    }
+
+    const styleRules: string[] = []
+    const newDecorations: monacoNS.editor.IModelDeltaDecoration[] = []
+
+    Object.entries(blameData).forEach(([lineStr, info]) => {
+      const line = parseInt(lineStr, 10)
+      const label = `${info.commit} (${info.author.slice(0, 10)})`
+      
+      styleRules.push(`
+        .blame-gutter-${line}::before {
+          content: ${JSON.stringify(label)};
+          color: rgba(255,255,255,0.35);
+          font-size: 10px;
+          font-family: monospace;
+          margin-right: 6px;
+          display: inline-block;
+          width: 80px;
+          text-align: right;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+      `)
+
+      newDecorations.push({
+        range: new monacoRef.current!.Range(line, 1, line, 1),
+        options: {
+          isWholeLine: false,
+          marginClassName: `blame-gutter-item blame-gutter-${line}`,
+          hoverMessage: {
+            value: `**Commit:** ${info.commit}\n\n**Author:** ${info.author}\n\n**Date:** ${info.date}\n\n**Summary:** ${info.summary}`
+          }
+        }
+      })
+    })
+
+    setBlameStyleText(styleRules.join('\n'))
+    editorRef.current.updateOptions({ lineDecorationsWidth: 90 })
+    blameDecorationsRef.current = editorRef.current.deltaDecorations(blameDecorationsRef.current, newDecorations)
+
+    const currentLine = editorRef.current.getPosition()?.lineNumber || 1
+    updateActiveLineGhostText(currentLine)
+  }, [blameActive, blameData, updateActiveLineGhostText])
+
+  useEffect(() => {
+    return () => {
+      if (editorRef.current) {
+        blameDecorationsRef.current = editorRef.current.deltaDecorations(blameDecorationsRef.current, [])
+        ghostDecorationsRef.current = editorRef.current.deltaDecorations(ghostDecorationsRef.current, [])
+      }
+    }
+  }, [])
+
   // Create stable refs to avoid stale closures in handleMount commands
   const contentRef = useRef(content)
   const filePathRef = useRef(filePath)
@@ -760,6 +914,14 @@ const MonacoFallback: React.FC<{ panel: PanelType }> = ({ panel }) => {
     setDirty(false)
     persistRef.current({ filePath: target, content: currentContent, language: detectLang(target) })
     flash('saved')
+
+    if (blameActiveRef.current && resolvedRepoRootRef.current && target) {
+      window.electronAPI?.git?.blame(resolvedRepoRootRef.current, target).then(res => {
+        if (res?.ok && res.blame) {
+          setBlameData(res.blame)
+        }
+      })
+    }
   }, [])
 
   const doOpen = useCallback(async () => {
@@ -777,6 +939,7 @@ const MonacoFallback: React.FC<{ panel: PanelType }> = ({ panel }) => {
 
   const handleMount: OnMount = (editor, monaco: Monaco) => {
     editorRef.current = editor
+    monacoRef.current = monaco
     editor.updateOptions({
       fontFamily: prefs.editorFontFamily || "'JetBrainsMono Nerd Font', 'JetBrains Mono', 'Fira Code', 'SF Mono', Menlo, monospace",
       fontLigatures: true, fontSize, lineNumbers: 'on',
@@ -791,6 +954,10 @@ const MonacoFallback: React.FC<{ panel: PanelType }> = ({ panel }) => {
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => doSave(false))
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyS, () => doSave(true))
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyO, () => doOpen())
+
+    editor.onDidChangeCursorPosition((e) => {
+      updateActiveLineGhostTextRef.current?.(e.position.lineNumber)
+    })
   }
 
   const handleChange: OnChange = (value) => {
@@ -801,6 +968,16 @@ const MonacoFallback: React.FC<{ panel: PanelType }> = ({ panel }) => {
 
   return (
     <div className="editor-panel-root" style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', minHeight: 0 }}>
+      <style>{`
+        ${blameStyleText}
+        ${ghostStyleText}
+        .blame-gutter-item {
+          display: flex;
+          align-items: center;
+          justify-content: flex-end;
+          cursor: help;
+        }
+      `}</style>
       <div className="editor-toolbar" style={toolbarStyle}>
         <button style={btnStyle} onClick={doOpen}>Open</button>
         <button style={btnStyle} onClick={() => doSave(false)}>Save</button>
@@ -808,6 +985,38 @@ const MonacoFallback: React.FC<{ panel: PanelType }> = ({ panel }) => {
         <span style={{ flex: 1, opacity: 0.75, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {filePath || '(built-in editor · code-server not installed)'}{dirty ? ' ●' : ''}
         </span>
+        {resolvedRepoRoot && filePath && (
+          <button
+            style={{
+              ...btnStyle,
+              background: blameActive ? 'rgba(77, 171, 232, 0.22)' : 'rgba(255,255,255,0.06)',
+              border: blameActive ? '1px solid #4dabe8' : '1px solid rgba(255,255,255,0.08)'
+            }}
+            onClick={async () => {
+              if (blameActive) {
+                setBlameActive(false)
+                setBlameData(null)
+                setBlameStyleText('')
+                setGhostStyleText('')
+                if (editorRef.current) {
+                  blameDecorationsRef.current = editorRef.current.deltaDecorations(blameDecorationsRef.current, [])
+                  ghostDecorationsRef.current = editorRef.current.deltaDecorations(ghostDecorationsRef.current, [])
+                  editorRef.current.updateOptions({ lineDecorationsWidth: 10 })
+                }
+              } else {
+                const res = await window.electronAPI?.git?.blame(resolvedRepoRoot, filePath)
+                if (res?.ok && res.blame) {
+                  setBlameData(res.blame)
+                  setBlameActive(true)
+                } else {
+                  flash(res?.error || 'Failed to blame file')
+                }
+              }
+            }}
+          >
+            Blame
+          </button>
+        )}
         <span style={{ opacity: 0.55 }}>{language}</span>
         <button style={{ ...btnStyle, opacity: wordWrap === 'on' ? 1 : 0.6 }} onClick={() => {
           setWordWrap(prev => {

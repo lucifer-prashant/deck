@@ -242,7 +242,21 @@ const WorkspaceChrome: React.FC = () => {
                     onDoubleClick={(e) => e.stopPropagation()}
                   />
                 ) : (
-                  <span>{tab.title}</span>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                    {tab.title}
+                    {tab.detached && (
+                      <span
+                        title="Popped out in a separate window. Click to focus."
+                        style={{ fontSize: 10, cursor: 'pointer', opacity: 0.8, color: '#4dabe8' }}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          window.electronAPI?.window?.popoutTab(tab.id)
+                        }}
+                      >
+                        ⇱
+                      </span>
+                    )}
+                  </span>
                 )}
                 {tabs.length > 1 && renamingTabId !== tab.id && (
                   <span

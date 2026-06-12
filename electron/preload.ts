@@ -88,11 +88,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     stashList: (repoRoot: string) => ipcRenderer.invoke('git:stash-list', repoRoot),
     stashSave: (repoRoot: string, message?: string) => ipcRenderer.invoke('git:stash-save', { repoRoot, message }),
     stashPop: (repoRoot: string, ref: string) => ipcRenderer.invoke('git:stash-pop', { repoRoot, ref }),
-    stashDrop: (repoRoot: string, ref: string) => ipcRenderer.invoke('git:stash-drop', { repoRoot, ref })
+    stashDrop: (repoRoot: string, ref: string) => ipcRenderer.invoke('git:stash-drop', { repoRoot, ref }),
+    applyPatch: (repoRoot: string, patch: string, reverse?: boolean) => ipcRenderer.invoke('git:apply-patch', { repoRoot, patch, reverse }),
+    blame: (repoRoot: string, path: string) => ipcRenderer.invoke('git:blame', { repoRoot, path }),
+    show: (repoRoot: string, sha: string) => ipcRenderer.invoke('git:show', { repoRoot, sha })
   },
   window: {
     popoutPanel: (panelId: string) => ipcRenderer.invoke('window:popout-panel', panelId),
     redockPanel: (panelId: string) => ipcRenderer.invoke('window:redock-panel', panelId),
+    popoutTab: (tabId: string) => ipcRenderer.invoke('window:popout-tab', tabId),
+    redockTab: (tabId: string) => ipcRenderer.invoke('window:redock-tab', tabId),
     isPopout: () => ipcRenderer.invoke('window:is-popout'),
     onPanelDetached: (cb: (panelId: string) => void) => {
       const l = (_e: Electron.IpcRendererEvent, p: { panelId: string }) => cb(p.panelId)
@@ -103,6 +108,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
       const l = (_e: Electron.IpcRendererEvent, p: { panelId: string }) => cb(p.panelId)
       ipcRenderer.on('panel:redocked', l)
       return () => ipcRenderer.removeListener('panel:redocked', l)
+    },
+    onTabDetached: (cb: (tabId: string) => void) => {
+      const l = (_e: Electron.IpcRendererEvent, p: { tabId: string }) => cb(p.tabId)
+      ipcRenderer.on('tab:detached', l)
+      return () => ipcRenderer.removeListener('tab:detached', l)
+    },
+    onTabRedocked: (cb: (tabId: string) => void) => {
+      const l = (_e: Electron.IpcRendererEvent, p: { tabId: string }) => cb(p.tabId)
+      ipcRenderer.on('tab:redocked', l)
+      return () => ipcRenderer.removeListener('tab:redocked', l)
     },
     onPopoutFlush: (cb: () => void) => {
       const l = () => cb()
@@ -201,18 +216,25 @@ declare global {
         push: (repoRoot: string, setUpstream?: boolean) => Promise<{ ok: boolean; error?: string; output?: string }>
         checkout: (repoRoot: string, branch: string, create?: boolean) => Promise<{ ok: boolean; error?: string }>
         diff: (repoRoot: string, path?: string, staged?: boolean) => Promise<{ ok: boolean; diff?: string; error?: string }>
-        log: (repoRoot: string, limit?: number) => Promise<{ ok: boolean; commits?: Array<{ sha: string; subject: string; author: string; date: string; refs: string }>; error?: string }>
+        log: (repoRoot: string, limit?: number) => Promise<{ ok: boolean; commits?: Array<{ isGraphOnly: boolean; graph: string; sha?: string; author?: string; date?: string; subject?: string; refs?: string }>; error?: string }>
         stashList: (repoRoot: string) => Promise<{ ok: boolean; stashes?: Array<{ ref: string; message: string }>; error?: string }>
         stashSave: (repoRoot: string, message?: string) => Promise<{ ok: boolean; error?: string }>
         stashPop: (repoRoot: string, ref: string) => Promise<{ ok: boolean; error?: string }>
         stashDrop: (repoRoot: string, ref: string) => Promise<{ ok: boolean; error?: string }>
+        applyPatch: (repoRoot: string, patch: string, reverse?: boolean) => Promise<{ ok: boolean; error?: string }>
+        blame: (repoRoot: string, path: string) => Promise<{ ok: boolean; blame?: Record<number, { commit: string; author: string; summary: string; date: string }>; error?: string }>
+        show: (repoRoot: string, sha: string) => Promise<{ ok: boolean; stdout?: string; error?: string }>
       }
       window: {
         popoutPanel: (panelId: string) => Promise<{ ok: boolean; error?: string }>
         redockPanel: (panelId: string) => Promise<{ ok: boolean }>
-        isPopout: () => Promise<{ popout: boolean; panelId?: string }>
+        popoutTab: (tabId: string) => Promise<{ ok: boolean; error?: string }>
+        redockTab: (tabId: string) => Promise<{ ok: boolean }>
+        isPopout: () => Promise<{ popout: boolean; panelId?: string; tabId?: string }>
         onPanelDetached: (cb: (panelId: string) => void) => () => void
         onPanelRedocked: (cb: (panelId: string) => void) => () => void
+        onTabDetached: (cb: (tabId: string) => void) => () => void
+        onTabRedocked: (cb: (tabId: string) => void) => () => void
         onPopoutFlush: (cb: () => void) => () => void
       }
       appClose: {

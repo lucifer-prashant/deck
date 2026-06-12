@@ -68,18 +68,25 @@ interface Window {
       push: (repoRoot: string, setUpstream?: boolean) => Promise<{ ok: boolean; error?: string; output?: string }>
       checkout: (repoRoot: string, branch: string, create?: boolean) => Promise<{ ok: boolean; error?: string }>
       diff: (repoRoot: string, path?: string, staged?: boolean) => Promise<{ ok: boolean; diff?: string; error?: string }>
-      log: (repoRoot: string, limit?: number) => Promise<{ ok: boolean; commits?: Array<{ sha: string; subject: string; author: string; date: string; refs: string }>; error?: string }>
+      log: (repoRoot: string, limit?: number) => Promise<{ ok: boolean; commits?: Array<{ isGraphOnly: boolean; graph: string; sha?: string; author?: string; date?: string; subject?: string; refs?: string }>; error?: string }>
       stashList: (repoRoot: string) => Promise<{ ok: boolean; stashes?: Array<{ ref: string; message: string }>; error?: string }>
       stashSave: (repoRoot: string, message?: string) => Promise<{ ok: boolean; error?: string }>
       stashPop: (repoRoot: string, ref: string) => Promise<{ ok: boolean; error?: string }>
       stashDrop: (repoRoot: string, ref: string) => Promise<{ ok: boolean; error?: string }>
+      applyPatch: (repoRoot: string, patch: string, reverse?: boolean) => Promise<{ ok: boolean; error?: string }>
+      blame: (repoRoot: string, path: string) => Promise<{ ok: boolean; blame?: Record<number, { commit: string; author: string; summary: string; date: string }>; error?: string }>
+      show: (repoRoot: string, sha: string) => Promise<{ ok: boolean; stdout?: string; error?: string }>
     }
     window: {
       popoutPanel: (panelId: string) => Promise<{ ok: boolean; error?: string }>
       redockPanel: (panelId: string) => Promise<{ ok: boolean }>
-      isPopout: () => Promise<{ popout: boolean; panelId?: string }>
+      popoutTab: (tabId: string) => Promise<{ ok: boolean; error?: string }>
+      redockTab: (tabId: string) => Promise<{ ok: boolean }>
+      isPopout: () => Promise<{ popout: boolean; panelId?: string; tabId?: string }>
       onPanelDetached: (cb: (panelId: string) => void) => () => void
       onPanelRedocked: (cb: (panelId: string) => void) => () => void
+      onTabDetached: (cb: (tabId: string) => void) => () => void
+      onTabRedocked: (cb: (tabId: string) => void) => () => void
       onPopoutFlush: (cb: () => void) => () => void
     }
     appClose: {

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useWorkspaceStore } from '../../store/workspaceStore'
 import '../GlobalSearch.css'
@@ -273,6 +273,7 @@ const GitSection: React.FC<Props> = ({ repoRoot, pinned, onTogglePin }) => {
           path={diffPath.path}
           staged={diffPath.staged}
           onClose={() => setDiffPath(null)}
+          onChange={refresh}
         />
       )}
     </div>
@@ -460,44 +461,153 @@ const StashPanel: React.FC<{ repoRoot: string; onError: (msg: string) => void }>
   )
 }
 
-const DiffModal: React.FC<{ repoRoot: string; path: string; staged: boolean; onClose: () => void }> = ({ repoRoot, path, staged, onClose }) => {
+interface DiffHunk {
+  header: string
+  lines: string[]
+}
+
+const parseDiff = (diffText: string) => {
+  const lines = diffText.split('\n')
+  const headerLines: string[] = []
+  const hunks: DiffHunk[] = []
+  
+  let i = 0
+  while (i < lines.length && !lines[i].startsWith('@@')) {
+    headerLines.push(lines[i])
+    i++
+  }
+  
+  let currentHunk: DiffHunk | null = null
+  while (i < lines.length) {
+    const line = lines[i]
+    if (line.startsWith('@@')) {
+      if (currentHunk) {
+        hunks.push(currentHunk)
+      }
+      currentHunk = { header: line, lines: [] }
+    } else if (currentHunk) {
+      currentHunk.lines.push(line)
+    }
+    i++
+  }
+  if (currentHunk) {
+    hunks.push(currentHunk)
+  }
+  return {
+    diffHeader: headerLines.join('\n'),
+    hunks
+  }
+}
+
+const DiffModal: React.FC<{
+  repoRoot: string
+  path: string
+  staged: boolean
+  onClose: () => void
+  onChange: () => void
+}> = ({ repoRoot, path, staged, onClose, onChange }) => {
   const [diff, setDiff] = useState<string>('')
   const [loading, setLoading] = useState(true)
+  const [refreshKey, setRefreshKey] = useState(0)
+  const [errorMsg, setErrorMsg] = useState('')
 
   useEffect(() => {
     setLoading(true)
+    setErrorMsg('')
     window.electronAPI?.git?.diff(repoRoot, path, staged).then(r => {
       setLoading(false)
       setDiff(r?.diff || r?.error || '(no diff)')
     })
-  }, [repoRoot, path, staged])
+  }, [repoRoot, path, staged, refreshKey])
+
+  const parsed = useMemo(() => {
+    if (!diff) return { diffHeader: '', hunks: [] }
+    return parseDiff(diff)
+  }, [diff])
+
+  const handleApplyHunk = async (hunk: DiffHunk, isStageAction: boolean) => {
+    setErrorMsg('')
+    const patch = `${parsed.diffHeader}\n${hunk.header}\n${hunk.lines.join('\n')}\n`
+    const reverse = !isStageAction
+    const res = await window.electronAPI.git.applyPatch(repoRoot, patch, reverse)
+    if (res.ok) {
+      setRefreshKey(prev => prev + 1)
+      onChange()
+    } else {
+      setErrorMsg(res.error || 'Failed to apply hunk')
+    }
+  }
 
   return createPortal(
     <div className="gs-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}>
-      <div className="gs-panel" style={{ width: 'min(900px, calc(100vw - 64px))' }} onMouseDown={(e) => e.stopPropagation()}>
+      <div className="gs-panel" style={{ width: 'min(900px, calc(100vw - 64px))', maxHeight: 'calc(100vh - 64px)', display: 'flex', flexDirection: 'column' }} onMouseDown={(e) => e.stopPropagation()}>
         <div className="gs-head">
           <span className="gs-icon">±</span>
           <span style={{ flex: 1, fontFamily: 'JetBrains Mono, monospace', fontSize: 12.5 }}>{path}{staged ? ' (staged)' : ''}</span>
           <button className="gs-close" onClick={onClose}>×</button>
         </div>
-        <div style={{ flex: 1, overflow: 'auto', padding: '8px 0' }}>
+        <div style={{ flex: 1, overflow: 'auto', padding: '16px' }}>
           {loading && <div className="gs-empty">loading diff…</div>}
-          {!loading && (
-            <pre style={{
-              margin: 0, padding: '0 16px', fontSize: 11.5,
-              fontFamily: 'JetBrains Mono, monospace', lineHeight: 1.5,
-              whiteSpace: 'pre', overflowX: 'auto'
+          {errorMsg && (
+            <div style={{
+              color: '#ed8796', marginBottom: '12px', fontSize: '12.5px',
+              background: 'rgba(237,135,150,0.1)', padding: '8px 12px',
+              borderRadius: '4px', border: '1px solid rgba(237,135,150,0.2)'
             }}>
-              {diff.split('\n').map((line, i) => {
-                let color = 'inherit'
-                if (line.startsWith('+') && !line.startsWith('+++')) color = '#86db8f'
-                else if (line.startsWith('-') && !line.startsWith('---')) color = '#f48fb1'
-                else if (line.startsWith('@@')) color = '#8ab4f8'
-                else if (line.startsWith('diff ') || line.startsWith('index ')) color = 'rgba(255,255,255,0.4)'
-                return <div key={i} style={{ color }}>{line || ' '}</div>
-              })}
+              {errorMsg}
+            </div>
+          )}
+          {!loading && parsed.hunks.length === 0 && (
+            <pre style={{
+              margin: 0, padding: '12px', fontSize: 11.5,
+              fontFamily: 'JetBrains Mono, monospace', lineHeight: 1.5,
+              whiteSpace: 'pre-wrap', wordBreak: 'break-all', overflowX: 'auto',
+              background: '#151619', color: 'rgba(255,255,255,0.7)'
+            }}>
+              {diff}
             </pre>
           )}
+          {!loading && parsed.hunks.map((hunk: DiffHunk, idx: number) => (
+            <div key={idx} className="diff-hunk-card" style={{ background: 'rgba(255,255,255,0.01)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '6px', marginBottom: '16px', overflow: 'hidden' }}>
+              <div className="diff-hunk-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 12px', background: 'rgba(255,255,255,0.02)', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '11px', color: '#888' }}>{hunk.header}</span>
+                <button
+                  onClick={() => handleApplyHunk(hunk, !staged)}
+                  style={{
+                    background: staged ? 'rgba(237,135,150,0.15)' : 'rgba(166,227,161,0.15)',
+                    color: staged ? '#ed8796' : '#a6e3a1',
+                    border: `1px solid ${staged ? 'rgba(237,135,150,0.3)' : 'rgba(166,227,161,0.3)'}`,
+                    borderRadius: '4px',
+                    padding: '3px 8px',
+                    fontSize: '11px',
+                    cursor: 'pointer',
+                    fontWeight: 600
+                  }}
+                >
+                  {staged ? 'Unstage Hunk' : 'Stage Hunk'}
+                </button>
+              </div>
+              <pre style={{
+                margin: 0, padding: '12px', fontSize: 11.5,
+                fontFamily: 'JetBrains Mono, monospace', lineHeight: 1.5,
+                whiteSpace: 'pre', overflowX: 'auto',
+                background: '#151619'
+              }}>
+                {hunk.lines.map((line: string, i: number) => {
+                  let color = 'inherit'
+                  let bg = 'transparent'
+                  if (line.startsWith('+') && !line.startsWith('+++')) {
+                    color = '#a6e3a1'
+                    bg = 'rgba(166,227,161,0.06)'
+                  } else if (line.startsWith('-') && !line.startsWith('---')) {
+                    color = '#ed8796'
+                    bg = 'rgba(237,135,150,0.06)'
+                  }
+                  return <div key={i} style={{ color, background: bg, padding: '0 4px' }}>{line || ' '}</div>
+                })}
+              </pre>
+            </div>
+          ))}
         </div>
       </div>
     </div>,
