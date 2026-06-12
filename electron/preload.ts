@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getPlatform: () => ipcRenderer.invoke('get-platform'),
   getWebviewPreloadPath: () => ipcRenderer.invoke('get-webview-preload-path'),
   openExternal: (url: string) => ipcRenderer.invoke('open-external', url),
+  detectShells: () => ipcRenderer.invoke('shell:detect-available'),
   onWorkspaceCommand: (callback: (command: string) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, command: string) => callback(command)
     ipcRenderer.on('workspace-command', listener)
@@ -18,7 +19,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('canvas-zoom-command', listener)
   },
   onTouchpadPinch: (callback: (data: { scale: number; velocity: number; centerX: number; centerY: number }) => void) => {
-    ipcRenderer.on('touchpad-pinch', (event, data) => callback(data))
+    const listener = (_event: Electron.IpcRendererEvent, data: { scale: number; velocity: number; centerX: number; centerY: number }) => callback(data)
+    ipcRenderer.on('touchpad-pinch', listener)
+    return () => { ipcRenderer.removeListener('touchpad-pinch', listener) }
   },
   pty: {
     spawn: (args: { panelId: string; cwd?: string; cols?: number; rows?: number; shell?: string }) =>
@@ -59,7 +62,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     reveal: (path: string) => ipcRenderer.invoke('shell:reveal', path),
     trash: (path: string) => ipcRenderer.invoke('shell:trash', path),
     writeAsset: (data: string, filename?: string) => ipcRenderer.invoke('fs:write-asset', { data, filename }),
-    assetDir: () => ipcRenderer.invoke('fs:asset-dir')
+    assetDir: () => ipcRenderer.invoke('fs:asset-dir'),
+    searchPaths: (root: string, query: string) => ipcRenderer.invoke('fs:search-paths', { root, query }),
+    welcomePath: () => ipcRenderer.invoke('fs:welcome-path'),
+    importAsAsset: (path: string) => ipcRenderer.invoke('fs:import-as-asset', path)
   },
   search: {
     files: (root: string, query: string, maxResults?: number) => ipcRenderer.invoke('search:files', { root, query, maxResults })
@@ -116,6 +122,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     start: () => ipcRenderer.invoke('codeserver:start'),
     status: () => ipcRenderer.invoke('codeserver:status'),
     stop: () => ipcRenderer.invoke('codeserver:stop'),
+    authenticatePartition: (partitionName: string) => ipcRenderer.invoke('codeserver:authenticate-partition', partitionName),
     onExit: (cb: (info: { code: number | null; signal: NodeJS.Signals | null }) => void) => {
       const l = (_e: Electron.IpcRendererEvent, p: { code: number | null; signal: NodeJS.Signals | null }) => cb(p)
       ipcRenderer.on('codeserver:exit', l)
@@ -139,9 +146,10 @@ declare global {
       getPlatform: () => Promise<string>
       getWebviewPreloadPath: () => Promise<string>
       openExternal: (url: string) => Promise<{ ok: boolean; error?: string }>
+      detectShells: () => Promise<Array<{ type: string; label: string; path: string }>>
       onWorkspaceCommand: (callback: (command: string) => void) => () => void
       onCanvasZoomCommand: (callback: (direction: 'in' | 'out' | 'reset') => void) => () => void
-      onTouchpadPinch: (callback: (data: { scale: number; velocity: number; centerX: number; centerY: number }) => void) => void
+      onTouchpadPinch: (callback: (data: { scale: number; velocity: number; centerX: number; centerY: number }) => void) => () => void
       pty: {
         spawn: (args: { panelId: string; cwd?: string; cols?: number; rows?: number; shell?: string }) => Promise<{ ok: boolean; panelId: string; pid?: number; cwd?: string; shell?: string }>
         write: (panelId: string, data: string) => void
@@ -170,6 +178,11 @@ declare global {
         touch: (path: string) => Promise<{ ok: boolean; error?: string }>
         reveal: (path: string) => Promise<{ ok: boolean; error?: string }>
         trash: (path: string) => Promise<{ ok: boolean; error?: string }>
+        searchPaths: (root: string, query: string) => Promise<{ ok: boolean; results?: string[]; error?: string }>
+        welcomePath: () => Promise<string>
+        importAsAsset: (path: string) => Promise<{ ok: boolean; filename?: string; path?: string; error?: string }>
+        writeAsset: (data: string, filename?: string) => Promise<{ ok: boolean; filename?: string; path?: string; error?: string }>
+        assetDir: () => Promise<string>
       }
       search: {
         files: (root: string, query: string, maxResults?: number) => Promise<{ ok: boolean; results: Array<{ file: string; line: number; text: string }>; tool: string }>
@@ -210,6 +223,7 @@ declare global {
         start: () => Promise<{ ok: boolean; port?: number; url?: string; error?: string }>
         status: () => Promise<{ ok: boolean; running?: boolean; port?: number; url?: string; available?: boolean }>
         stop: () => Promise<{ ok: boolean }>
+        authenticatePartition: (partitionName: string) => Promise<{ ok: boolean; error?: string }>
         onExit: (cb: (info: { code: number | null; signal: NodeJS.Signals | null }) => void) => () => void
       }
       triggerUpdate: (url: string, filename: string) => Promise<{ ok: boolean; error?: string; downloadedTo?: string }>

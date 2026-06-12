@@ -162,7 +162,7 @@ const TerminalPanel: React.FC<Props> = ({ panel }) => {
             if (lastType) {
               shellType = lastType
             } else {
-              shellType = 'powershell' // default fallback
+              shellType = (window.electronAPI?.platform || 'linux') === 'win32' ? 'powershell' : 'custom'
             }
           }
         }
@@ -219,15 +219,27 @@ const TerminalPanel: React.FC<Props> = ({ panel }) => {
       }
     })
 
-    // Poll /proc/<pid>/cwd so sidebar Explorer follows cd's. Cheap symlink read every 1.5s.
+    // Poll CWD so sidebar Explorer follows cd's. Cheap read every 1.5s, properly debounced.
     let lastCwd = ''
-    const cwdInterval = window.setInterval(async () => {
-      const r = await api.cwd(panel.id)
-      if (r?.ok && r.cwd && r.cwd !== lastCwd) {
-        lastCwd = r.cwd
-        useWorkspaceStore.getState().updatePanel(panel.id, { cwd: r.cwd }, { skipHistory: true })
+    let active = true
+    let cwdTimeoutId: number | null = null
+
+    const checkCwd = async () => {
+      if (!active) return
+      try {
+        const r = await api.cwd(panel.id)
+        if (active && r?.ok && r.cwd && r.cwd !== lastCwd) {
+          lastCwd = r.cwd
+          useWorkspaceStore.getState().updatePanel(panel.id, { cwd: r.cwd }, { skipHistory: true })
+        }
+      } catch (err) {
+        // ignore
       }
-    }, 1500)
+      if (active) {
+        cwdTimeoutId = window.setTimeout(checkCwd, 1500)
+      }
+    }
+    cwdTimeoutId = window.setTimeout(checkCwd, 1500)
 
     const ro = new ResizeObserver(() => {
       if (!fitRef.current || !termRef.current) return
@@ -239,11 +251,14 @@ const TerminalPanel: React.FC<Props> = ({ panel }) => {
     ro.observe(containerRef.current)
 
     return () => {
+      active = false
       try { ro.disconnect() } catch { /* ignore */ }
       try { inputDisp.dispose() } catch { /* ignore */ }
       try { disposeData.current?.() } catch { /* ignore */ }
       try { disposeExit.current?.() } catch { /* ignore */ }
-      try { window.clearInterval(cwdInterval) } catch { /* ignore */ }
+      if (cwdTimeoutId !== null) {
+        try { window.clearTimeout(cwdTimeoutId) } catch { /* ignore */ }
+      }
       // Do NOT kill the pty on unmount — the panel may be popping out into a
       // separate window or being temporarily detached. The pty session lives
       // in the main process and survives across windows. It is explicitly

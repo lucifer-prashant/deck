@@ -20,15 +20,13 @@ const TYPE_COLORS: Record<string, string> = {
 const Minimap: React.FC = () => {
   const minimapRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<HTMLDivElement>(null)
-  const {
-    panels,
-    selectedPanelIds,
-    viewport,
-    setViewport,
-    selectPanel,
-    toggleMinimap,
-    viewportBookmarks
-  } = useWorkspaceStore()
+  const panels = useWorkspaceStore(s => s.panels)
+  const selectedPanelIds = useWorkspaceStore(s => s.selectedPanelIds)
+  const viewport = useWorkspaceStore(s => s.viewport)
+  const setViewport = useWorkspaceStore(s => s.setViewport)
+  const selectPanel = useWorkspaceStore(s => s.selectPanel)
+  const toggleMinimap = useWorkspaceStore(s => s.toggleMinimap)
+  const viewportBookmarks = useWorkspaceStore(s => s.viewportBookmarks)
 
   const [pos, setPos] = useState(() => {
     const saved = localStorage.getItem('worktree-studio-minimap-pos')

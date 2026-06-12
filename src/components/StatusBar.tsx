@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, useRef } from 'react'
 import { useWorkspaceStore } from '../store/workspaceStore'
 import { executeWorkspaceCommand } from '../workspaceCommands'
 import PresetsMenu from './PresetsMenu'
@@ -6,33 +6,46 @@ import BookmarksMenu from './BookmarksMenu'
 import './StatusBar.css'
 
 const StatusBar: React.FC = () => {
-  const {
-    panels,
-    selectedPanelIds,
-    viewport,
-    statusBarVisible,
-    toggleHelp,
-    loadPreset,
-    prefs,
-    viewportBookmarks,
-    saveViewportBookmark,
-    loadViewportBookmark
-  } = useWorkspaceStore()
+  const statusBarVisible = useWorkspaceStore(s => s.statusBarVisible)
+  const toggleHelp = useWorkspaceStore(s => s.toggleHelp)
+  const loadPreset = useWorkspaceStore(s => s.loadPreset)
+  const prefs = useWorkspaceStore(s => s.prefs)
+  const viewportBookmarks = useWorkspaceStore(s => s.viewportBookmarks)
+  const saveViewportBookmark = useWorkspaceStore(s => s.saveViewportBookmark)
+  const loadViewportBookmark = useWorkspaceStore(s => s.loadViewportBookmark)
+  const zoom = useWorkspaceStore(s => s.viewport.zoom)
 
-  const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null)
+  const summary = useWorkspaceStore(
+    s => {
+      const selected = s.selectedPanelIds.map(id => s.panels[id]).filter(Boolean)
+      const count = Object.values(s.panels).filter(p => p.type !== 'region').length
+      const selCount = s.selectedPanelIds.length
+      return selected.length === 1
+        ? `${selected[0].title} · ${Math.round(selected[0].width)}×${Math.round(selected[0].height)} @ (${Math.round(selected[0].x)}, ${Math.round(selected[0].y)})`
+        : selCount > 1
+          ? `${selCount} panels selected`
+          : `${count} panel${count === 1 ? '' : 's'} on canvas`
+    }
+  )
+
+  const readoutRef = useRef<HTMLSpanElement>(null)
 
   const [presetsMenu, setPresetsMenu] = useState<{ x: number; y: number } | null>(null)
   const [bookmarksMenu, setBookmarksMenu] = useState<{ x: number; y: number } | null>(null)
 
   useEffect(() => {
+    if (!prefs.showCursorReadout) return
     const handler = (e: MouseEvent) => {
-      const worldX = (e.clientX - viewport.x) / viewport.zoom
-      const worldY = (e.clientY - viewport.y) / viewport.zoom
-      setCursor({ x: worldX, y: worldY })
+      const v = useWorkspaceStore.getState().viewport
+      const worldX = (e.clientX - v.x) / v.zoom
+      const worldY = (e.clientY - v.y) / v.zoom
+      if (readoutRef.current) {
+        readoutRef.current.textContent = `${Math.round(worldX)}, ${Math.round(worldY)}`
+      }
     }
-    window.addEventListener('mousemove', handler)
+    window.addEventListener('mousemove', handler, { passive: true })
     return () => window.removeEventListener('mousemove', handler)
-  }, [viewport.x, viewport.y, viewport.zoom])
+  }, [prefs.showCursorReadout])
 
   useEffect(() => {
     const handler = () => {
@@ -51,15 +64,6 @@ const StatusBar: React.FC = () => {
 
   if (!statusBarVisible) return null
 
-  // Count only real panels, not regions.
-  const count = Object.values(panels).filter(p => p.type !== 'region').length
-  const selCount = selectedPanelIds.length
-  const selected = selectedPanelIds.map(id => panels[id]).filter(Boolean)
-  const summary = selected.length === 1
-    ? `${selected[0].title} · ${Math.round(selected[0].width)}×${Math.round(selected[0].height)} @ (${Math.round(selected[0].x)}, ${Math.round(selected[0].y)})`
-    : selCount > 1
-      ? `${selCount} panels selected`
-      : `${count} panel${count === 1 ? '' : 's'} on canvas`
 
   return (
     <div className="status-bar">
@@ -132,14 +136,14 @@ const StatusBar: React.FC = () => {
           onClick={() => useWorkspaceStore.getState().toggleStatusBar()}
           title="Hide status bar"
         >▾</button>
-        <button className="status-chip ghost help" onClick={toggleHelp} title="Keyboard shortcuts (?)">?</button>
+        <button className="status-chip ghost help" onClick={toggleHelp} title="Deck Codex Manual (?)">?</button>
         <span className="status-sep" />
-        {prefs.showCursorReadout && cursor && (
-          <span className="status-item mono">
-            {Math.round(cursor.x)}, {Math.round(cursor.y)}
+        {prefs.showCursorReadout && (
+          <span ref={readoutRef} className="status-item mono">
+            0, 0
           </span>
         )}
-        <span className="status-item mono">{Math.round(viewport.zoom * 100)}%</span>
+        <span className="status-item mono">{Math.round(zoom * 100)}%</span>
       </div>
 
       {presetsMenu && <PresetsMenu anchor={presetsMenu} onClose={() => setPresetsMenu(null)} />}

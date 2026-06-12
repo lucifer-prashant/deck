@@ -421,7 +421,7 @@ describe('Tab Lifecycle', () => {
     useWorkspaceStore.getState().createTab('Tab 2')
     useWorkspaceStore.getState().createTab('Tab 3')
     const tabs = useWorkspaceStore.getState().tabs
-    const [first, second, third] = tabs.map(t => t.id)
+    const [first, , third] = tabs.map(t => t.id)
     useWorkspaceStore.getState().reorderTab(third, first) // move third before first
     const reordered = useWorkspaceStore.getState().tabs.map(t => t.id)
     expect(reordered.indexOf(third)).toBeLessThan(reordered.indexOf(first))
@@ -499,7 +499,6 @@ describe('Region Grouping', () => {
 
   it('ungroupRegion: no-op for non-region panel', () => {
     useWorkspaceStore.getState().addPanel(makePanel('p1'))
-    const panelsBefore = { ...useWorkspaceStore.getState().panels }
     useWorkspaceStore.getState().ungroupRegion('p1')
     // p1 should still exist (not deleted because it's not a region)
     expect(useWorkspaceStore.getState().panels['p1']).toBeDefined()
@@ -707,7 +706,6 @@ describe('Canvas Presets', () => {
   it('overwriteCanvasPreset: updates savedAt and panels', () => {
     useWorkspaceStore.getState().addPanel(makePanel('p1'))
     const id = useWorkspaceStore.getState().saveCanvasPreset('Test')
-    const oldSavedAt = useWorkspaceStore.getState().canvasPresets[id].savedAt
 
     // Add another panel, then overwrite
     useWorkspaceStore.getState().addPanel(makePanel('p2'))
@@ -1000,3 +998,52 @@ describe('DEFAULT_KEYBINDINGS', () => {
     expect(DEFAULT_KEYBINDINGS['toggle-help']).toBe('?')
   })
 })
+
+// ─── ONBOARDING & SANDBOX ──────────────────────────────────────────────────
+
+describe('Onboarding & Sandbox', () => {
+  it('has correct default onboarding and codex state', () => {
+    const s = useWorkspaceStore.getState()
+    expect(s.prefs.onboardingComplete).toBe(false)
+    expect(s.prefs.wizardStep).toBe(0)
+    expect(s.activeCodexPage).toBe('canvas-nav')
+    expect(s.highlightedGlossaryTerm).toBeNull()
+    expect(s.sandboxRestoreViewport).toBeNull()
+  })
+
+  it('openCodexToPage sets page, term, and opens help', () => {
+    const store = useWorkspaceStore.getState()
+    store.openCodexToPage('settings-glossary', 'fontSize')
+    
+    const s = useWorkspaceStore.getState()
+    expect(s.helpOpen).toBe(true)
+    expect(s.activeCodexPage).toBe('settings-glossary')
+    expect(s.highlightedGlossaryTerm).toBe('fontSize')
+  })
+
+  it('enterSandbox spawns panels, closes help, and exits sandbox cleans them up', () => {
+    const store = useWorkspaceStore.getState()
+    store.setViewport({ x: 10, y: 20, zoom: 1.2 })
+    store.openCodexToPage('canvas-nav')
+    
+    // Enter sandbox
+    store.enterSandbox()
+    let s = useWorkspaceStore.getState()
+    
+    expect(s.helpOpen).toBe(false) // closed codex
+    expect(s.sandboxRestoreViewport).toEqual({ x: 10, y: 20, zoom: 1.2 })
+    expect(s.panels['sandbox-terminal']).toBeDefined()
+    expect(s.panels['sandbox-editor']).toBeDefined()
+    expect(s.panels['sandbox-browser']).toBeDefined()
+
+    // Exit sandbox
+    store.exitSandbox()
+    s = useWorkspaceStore.getState()
+    
+    expect(s.sandboxRestoreViewport).toBeNull()
+    expect(s.panels['sandbox-terminal']).toBeUndefined()
+    expect(s.panels['sandbox-editor']).toBeUndefined()
+    expect(s.panels['sandbox-browser']).toBeUndefined()
+  })
+})
+

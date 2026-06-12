@@ -130,7 +130,8 @@ export function generateStraightPath(path: Point[]): string {
   return `M ${path[0].x} ${path[0].y} ` + path.slice(1).map(p => `L ${p.x} ${p.y}`).join(' ')
 }
 
-export function generateSmoothPath(path: Point[], k: number = 0.22): string {
+export function generateSmoothPath(path: Point[], _k: number = 0.22): string {
+  void _k;
   if (path.length === 0) return ''
   if (path.length === 1) return `M ${path[0].x} ${path[0].y}`
   if (path.length === 2) {
@@ -225,7 +226,8 @@ export function resolveConnectionRoute(
     sourceAnchor?: string; targetAnchor?: string;
     sourceEdgePos?: number; targetEdgePos?: number;
   },
-  panels: Record<string, { id: string; x: number; y: number; width: number; height: number; type: string; minimized?: boolean }>
+  panels: Record<string, { id: string; x: number; y: number; width: number; height: number; type: string; minimized?: boolean }>,
+  skipRouting?: boolean
 ): Point[] {
   const startPanelId = a.startPanelId || a.sourcePanelId
   const endPanelId = a.endPanelId || a.targetPanelId
@@ -257,6 +259,8 @@ export function resolveConnectionRoute(
 
   const start = { x: startX, y: startY }
   const end = { x: endX, y: endY }
+
+  if (skipRouting) return [start, end]
 
   const obstacles = Object.values(panels)
     .filter(p => p.type !== 'region' && p.id !== startPanelId && p.id !== endPanelId)

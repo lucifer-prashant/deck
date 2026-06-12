@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, ipcMain, dialog, shell, session, protocol } from 'electron'
+import { app, BrowserWindow, Menu, ipcMain, dialog, shell, session, protocol, net as electronNet } from 'electron'
 import { join, basename, dirname } from 'path'
 import { homedir } from 'os'
 import { promises as fsp, existsSync, readFileSync, writeFileSync } from 'fs'
@@ -8,6 +8,11 @@ import * as pty from 'node-pty'
 import * as crypto from 'crypto'
 import * as http from 'http'
 import { SHELL_CONFIGS, TerminalShellType } from '../src/types/terminalShells'
+
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'deck-asset', privileges: { secure: true, standard: true, supportFetchAPI: true, corsEnabled: true } },
+  { scheme: 'local-file', privileges: { secure: true, standard: true, supportFetchAPI: true, corsEnabled: true, stream: true } }
+])
 
 // ─── Single Instance Lock ───────────────────────────────────────────────────
 const gotTheLock = app.requestSingleInstanceLock()
@@ -205,7 +210,7 @@ function buildMenu() {
           }
         },
         {
-          label: 'Keyboard Shortcuts',
+          label: 'Deck Codex Manual',
           accelerator: 'F1',
           click: () => send('toggle-help')
         }
@@ -347,10 +352,79 @@ app.on('web-contents-created', (_evt, contents) => {
   try { contents.setUserAgent(CHROME_UA) } catch { /* ignore */ }
   try { sess.setUserAgent(CHROME_UA) } catch { /* ignore */ }
 
-  // Permissions: allow everything common a normal browser would. Lets sites
-  // request mic/camera/clipboard/geo/notifications/MIDI without silent denial.
-  sess.setPermissionRequestHandler((_wc, _perm, cb) => cb(true))
-  sess.setPermissionCheckHandler(() => true)
+  // Register custom protocols on the custom webview session if not already registered.
+  if (sess !== session.defaultSession) {
+    try {
+      sess.protocol.handle('local-file', async (req) => {
+        try {
+          let filepath = decodeURIComponent(req.url.replace('local-file://', ''))
+          if (process.platform === 'win32') {
+            if (filepath.startsWith('/')) {
+              filepath = filepath.slice(1)
+            }
+          } else {
+            if (!filepath.startsWith('/')) {
+              filepath = '/' + filepath
+            }
+          }
+          return await electronNet.fetch(`file://${filepath}`)
+        } catch {
+          return new Response('', { status: 404 })
+        }
+      })
+    } catch { /* ignore */ }
+
+    try {
+      sess.protocol.handle('deck-asset', async (req) => {
+        try {
+          const filename = req.url.replace('deck-asset://', '')
+          const filepath = join(app.getPath('userData'), 'assets', filename)
+          return await electronNet.fetch(`file://${filepath}`)
+        } catch {
+          return new Response('', { status: 404 })
+        }
+      })
+    } catch { /* ignore */ }
+  }
+
+  // Permissions: allow everything common a normal browser would on local origins (localhost, 127.0.0.1, file:).
+  // For external websites, restrict to safe defaults (clipboard-write, fullscreen, pointerLock, notifications).
+  sess.setPermissionRequestHandler((wc, permission, callback) => {
+    try {
+      const url = wc.getURL()
+      const parsed = new URL(url)
+      const isLocal = parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1' || parsed.protocol === 'file:'
+
+      if (isLocal) {
+        return callback(true)
+      }
+
+      const allowedPermissions = ['clipboard-write', 'fullscreen', 'pointerLock', 'notifications']
+      if (allowedPermissions.includes(permission)) {
+        return callback(true)
+      }
+    } catch {
+      // fallback to reject on error
+    }
+    callback(false)
+  })
+  sess.setPermissionCheckHandler((wc, permission, requestingOrigin) => {
+    try {
+      const origin = requestingOrigin || (wc ? wc.getURL() : '')
+      if (!origin) return false
+      const parsed = new URL(origin)
+      const isLocal = parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1' || parsed.protocol === 'file:'
+
+      if (isLocal) {
+        return true
+      }
+
+      const allowedPermissions = ['clipboard-write', 'fullscreen', 'pointerLock', 'notifications']
+      return allowedPermissions.includes(permission)
+    } catch {
+      return false
+    }
+  })
   // Screen-share / window-pick (Discord call screen-share, Google Meet present, etc.)
   // needs an explicit handler since Electron 31+. We auto-pick the entire primary screen
   // — keeps Discord's start-screenshare flow one click without an OS picker.
@@ -360,7 +434,11 @@ app.on('web-contents-created', (_evt, contents) => {
       // dynamic import so dev builds without the screen API don't break.
       import('electron').then(({ desktopCapturer }) => {
         desktopCapturer.getSources({ types: ['screen'] }).then(sources => {
-          callback({ video: sources[0], audio: 'loopback' })
+          if (sources && sources.length > 0) {
+            callback({ video: sources[0], audio: 'loopback' })
+          } else {
+            callback({})
+          }
         }).catch(() => callback({}))
       }).catch(() => callback({}))
     })
@@ -397,7 +475,51 @@ app.on('web-contents-created', (_evt, contents) => {
   })
 })
 
+async function ensureOnboardingWelcomeFile() {
+  const onboardingDir = join(app.getPath('userData'), 'onboarding')
+  const welcomeFilePath = join(onboardingDir, 'WELCOME.md')
+
+  try {
+    if (!existsSync(onboardingDir)) {
+      await fsp.mkdir(onboardingDir, { recursive: true })
+    }
+
+    if (!existsSync(welcomeFilePath)) {
+      const welcomeContent = `# Welcome to Deck! 🚀
+
+Welcome to your new spatial developer workspace. Here are a few tips to get you started:
+
+### 🎯 Canvas Control Keys
+* **Hold Middle-Click (or Space + Drag):** Pan around the infinite canvas.
+* **Scroll Wheel (or Ctrl + / -):** Zoom in and out. Zoom follows your mouse cursor!
+* **Ctrl + E:** Create a new code editor panel.
+* **Double-Click Canvas:** Create your default terminal (configurable in Settings).
+
+### 📦 Stacking & Decks
+* **Docking:** Drag one panel's header on top of another panel's header to group them into tabs.
+* **Unstacking:** Drag a tab out of the stack back onto the canvas.
+* **Pop-out:** Click the pop-out button on a panel to detach it into a separate native window while maintaining its live running process.
+
+### 📁 File Tree Drag & Drop
+* Drag a **file** onto the canvas to open it in an editor.
+* Drag a **folder** to spawn a terminal at that directory.
+* Drag an **image or PDF** to create a specialized media card.
+
+*For more tips and documentation, click the **Codex** icon in the status bar or press the **?** key.*
+`
+      await fsp.writeFile(welcomeFilePath, welcomeContent, 'utf8')
+    }
+  } catch (err) {
+    console.error('Failed to create onboarding WELCOME.md file:', err)
+  }
+}
+
+ipcMain.handle('fs:welcome-path', () => {
+  return join(app.getPath('userData'), 'onboarding', 'WELCOME.md')
+})
+
 app.whenReady().then(async () => {
+  await ensureOnboardingWelcomeFile()
   // Clear stale service workers for the code-server partition on every launch.
   // The Service Worker DB gets a stale LOCK file when the app exits ungracefully,
   // causing "Failed to delete the database: Database IO error" on next start and a
@@ -406,13 +528,27 @@ app.whenReady().then(async () => {
     await session.fromPartition('persist:wts-code-server').clearStorageData({ storages: ['serviceworkers', 'cookies'] })
   } catch { /* non-fatal */ }
   protocol.handle('deck-asset', async (req) => {
-    const filename = req.url.replace('deck-asset://', '')
-    const filepath = join(app.getPath('userData'), 'assets', filename)
     try {
-      const data = await fsp.readFile(filepath)
-      const ext = filename.split('.').pop()?.toLowerCase() || 'png'
-      const mime = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml' }[ext] || 'image/png'
-      return new Response(data, { headers: { 'content-type': mime } })
+      const filename = req.url.replace('deck-asset://', '')
+      const filepath = join(app.getPath('userData'), 'assets', filename)
+      return await electronNet.fetch(`file://${filepath}`)
+    } catch {
+      return new Response('', { status: 404 })
+    }
+  })
+  protocol.handle('local-file', async (req) => {
+    try {
+      let filepath = decodeURIComponent(req.url.replace('local-file://', ''))
+      if (process.platform === 'win32') {
+        if (filepath.startsWith('/')) {
+          filepath = filepath.slice(1)
+        }
+      } else {
+        if (!filepath.startsWith('/')) {
+          filepath = '/' + filepath
+        }
+      }
+      return await electronNet.fetch(`file://${filepath}`)
     } catch {
       return new Response('', { status: 404 })
     }
@@ -475,6 +611,76 @@ ipcMain.handle('get-webview-preload-path', () => {
   return join(__dirname, 'webview-preload.js')
 })
 
+ipcMain.handle('shell:detect-available', async () => {
+  const available: Array<{ type: TerminalShellType; label: string; path: string }> = []
+
+  if (IS_WIN) {
+    // Windows shells
+    available.push({ type: 'powershell', label: 'PowerShell', path: 'powershell.exe' })
+    available.push({ type: 'cmd', label: 'Command Prompt', path: 'cmd.exe' })
+
+    // Check WSL
+    const wslPath = join(process.env.SystemRoot || 'C:\\Windows', 'System32\\wsl.exe')
+    if (existsSync(wslPath)) {
+      available.push({ type: 'wsl', label: 'WSL', path: 'wsl.exe' })
+    }
+
+    // Check Git Bash using standard resolutions
+    let gitBashPath: string | null = null
+    const gitBashPaths = [
+      'C:\\Program Files\\Git\\bin\\bash.exe',
+      'C:\\Program Files\\Git\\usr\\bin\\bash.exe',
+      join(process.env.USERPROFILE || '', 'AppData\\Local\\Programs\\Git\\bin\\bash.exe'),
+      join(process.env.USERPROFILE || '', 'AppData\\Local\\Programs\\Git\\usr\\bin\\bash.exe'),
+      join(process.env.LOCALAPPDATA || '', 'Programs\\Git\\bin\\bash.exe'),
+    ]
+    for (const p of gitBashPaths) {
+      if (existsSync(p)) {
+        gitBashPath = p
+        break
+      }
+    }
+    if (gitBashPath) {
+      available.push({ type: 'gitbash', label: 'Git Bash', path: gitBashPath })
+    }
+  } else {
+    // Unix shells (Linux/macOS)
+    const commonShells = [
+      { name: 'Zsh', path: '/bin/zsh' },
+      { name: 'Zsh', path: '/usr/bin/zsh' },
+      { name: 'Bash', path: '/bin/bash' },
+      { name: 'Bash', path: '/usr/bin/bash' },
+      { name: 'Fish', path: '/usr/bin/fish' },
+      { name: 'Fish', path: '/bin/fish' },
+      { name: 'Ksh', path: '/bin/ksh' },
+      { name: 'Sh', path: '/bin/sh' },
+    ]
+
+    const checked = new Set<string>()
+
+    // Add default $SHELL if it exists
+    if (process.env.SHELL && existsSync(process.env.SHELL)) {
+      const path = process.env.SHELL
+      const name = path.split('/').pop() || 'Shell'
+      const label = name.charAt(0).toUpperCase() + name.slice(1)
+      available.push({ type: 'custom', label, path })
+      checked.add(path)
+    }
+
+    for (const shell of commonShells) {
+      if (!checked.has(shell.path) && existsSync(shell.path)) {
+        available.push({ type: 'custom', label: shell.name, path: shell.path })
+        checked.add(shell.path)
+      }
+    }
+  }
+
+  // Always append Custom Path fallback
+  available.push({ type: 'custom', label: 'Custom Path...', path: '' })
+
+  return available
+})
+
 function resolveShellPath(shellType: TerminalShellType | null, customPath: string): string {
   if (!shellType || shellType === 'custom') {
     return customPath || (IS_WIN ? (process.env.COMSPEC || 'cmd.exe') : (process.env.SHELL || '/bin/bash'))
@@ -510,7 +716,11 @@ function resolveShellPath(shellType: TerminalShellType | null, customPath: strin
 // ---- pty ----
 ipcMain.handle('pty:spawn', (e, args: { panelId: string; cwd?: string; cols?: number; rows?: number; shell?: string; shellType?: TerminalShellType; customPath?: string }) => {
   const { panelId } = args
-  if (ptys.has(panelId)) return { ok: true, panelId }
+  if (ptys.has(panelId)) {
+    const ownerWin = BrowserWindow.fromWebContents(e.sender)
+    if (ownerWin) ptyOwners.set(panelId, ownerWin)
+    return { ok: true, panelId }
+  }
 
   let shellType = args.shellType || null
   let customPath = args.customPath || ''
@@ -597,24 +807,222 @@ ipcMain.on('pty:kill', (_e, args: { panelId: string }) => {
   ptys.delete(args.panelId)
 })
 
+// Windows CWD Tracking using a persistent background PowerShell process
+// that compiles a C# PEB reader to query ReadProcessMemory asynchronously.
+let winCwdPowerShell: ChildProcess | null = null
+let winCwdPromiseQueue: Array<{ resolve: (val: string | null) => void }> = []
+
+function initWinCwdPowerShell() {
+  if (winCwdPowerShell) return
+
+  winCwdPowerShell = spawn('powershell.exe', [
+    '-NoProfile',
+    '-NonInteractive',
+    '-ExecutionPolicy', 'Bypass',
+    '-Command', '-'
+  ], {
+    stdio: ['pipe', 'pipe', 'ignore']
+  })
+
+  const psScript = `
+$code = @"
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+public class ProcessProperties {
+    [DllImport("ntdll.dll")]
+    public static extern int NtQueryInformationProcess(IntPtr processHandle, int processInformationClass, ref PROCESS_BASIC_INFORMATION processInformation, int processInformationLength, out int returnLength);
+    [DllImport("kernel32.dll")]
+    public static extern IntPtr OpenProcess(int dwDesiredAccess, bool bInheritHandle, int dwProcessId);
+    [DllImport("kernel32.dll")]
+    public static extern bool ReadProcessMemory(IntPtr hProcess, IntPtr lpBaseAddress, byte[] lpBuffer, int dwSize, out int lpNumberOfBytesRead);
+    [DllImport("kernel32.dll")]
+    public static extern bool CloseHandle(IntPtr hObject);
+    [StructLayout(LayoutKind.Sequential)]
+    public struct PROCESS_BASIC_INFORMATION {
+        public IntPtr ExitStatus;
+        public IntPtr PebBaseAddress;
+        public IntPtr AffinityMask;
+        public IntPtr BasePriority;
+        public IntPtr UniqueProcessId;
+        public IntPtr InheritedFromUniqueProcessId;
+    }
+    public static string GetCwd(int pid) {
+        IntPtr hProcess = OpenProcess(0x1010, false, pid);
+        if (hProcess == IntPtr.Zero) return null;
+        try {
+            PROCESS_BASIC_INFORMATION pbi = new PROCESS_BASIC_INFORMATION();
+            int temp;
+            int status = NtQueryInformationProcess(hProcess, 0, ref pbi, Marshal.SizeOf(pbi), out temp);
+            if (status != 0) return null;
+            byte[] peb = new byte[64];
+            if (!ReadProcessMemory(hProcess, pbi.PebBaseAddress, peb, peb.Length, out temp)) return null;
+            int is64 = IntPtr.Size;
+            int procParamsOffset = is64 == 8 ? 0x20 : 0x10;
+            IntPtr procParamsAddr = (IntPtr)BitConverter.ToInt64(peb, procParamsOffset);
+            byte[] procParams = new byte[256];
+            if (!ReadProcessMemory(hProcess, procParamsAddr, procParams, procParams.Length, out temp)) return null;
+            int cwdOffset = is64 == 8 ? 0x38 : 0x24;
+            long cwdBufferAddr = BitConverter.ToInt64(procParams, cwdOffset + 8);
+            int cwdLength = BitConverter.ToInt16(procParams, cwdOffset);
+            byte[] cwdBytes = new byte[cwdLength];
+            if (!ReadProcessMemory(hProcess, (IntPtr)cwdBufferAddr, cwdBytes, cwdBytes.Length, out temp)) return null;
+            return Encoding.Unicode.GetString(cwdBytes);
+        } catch {
+            return null;
+        } finally {
+            CloseHandle(hProcess);
+        }
+    }
+}
+"@
+Add-Type -TypeDefinition $code
+
+function Get-LeafPid($parentPid) {
+    try {
+        $children = Get-CimInstance Win32_Process -Filter "ParentProcessId = $parentPid" | Select-Object -ExpandProperty ProcessId
+        if ($null -eq $children -or $children.Count -eq 0) {
+            return $parentPid
+        }
+        $latestChild = $children | Measure-Object -Maximum | Select-Object -ExpandProperty Maximum
+        if ($null -eq $latestChild) {
+            return $parentPid
+        }
+        return Get-LeafPid $latestChild
+    } catch {
+        return $parentPid
+    }
+}
+
+while ($true) {
+    $line = [Console]::ReadLine()
+    if ($null -eq $line) { break }
+    $pidVal = 0
+    if ([int]::TryParse($line, [ref]$pidVal)) {
+        $leafPid = Get-LeafPid $pidVal
+        $cwd = [ProcessProperties]::GetCwd($leafPid)
+        if ($null -eq $cwd) {
+            [Console]::WriteLine("ERROR")
+        } else {
+            [Console]::WriteLine($cwd)
+        }
+    } else {
+        [Console]::WriteLine("ERROR")
+    }
+}
+`
+  winCwdPowerShell.stdin.write(psScript + "\n")
+
+  let buffer = ''
+  winCwdPowerShell.stdout.on('data', (data: Buffer) => {
+    buffer += data.toString()
+    let newlineIdx = buffer.indexOf('\n')
+    while (newlineIdx !== -1) {
+      const line = buffer.substring(0, newlineIdx).trim()
+      buffer = buffer.substring(newlineIdx + 1)
+      const nextPromise = winCwdPromiseQueue.shift()
+      if (nextPromise) {
+        if (line === 'ERROR' || line === 'INVALID') {
+          nextPromise.resolve(null)
+        } else {
+          nextPromise.resolve(line)
+        }
+      }
+      newlineIdx = buffer.indexOf('\n')
+    }
+  })
+
+  winCwdPowerShell.on('exit', () => {
+    winCwdPowerShell = null
+    const pending = winCwdPromiseQueue
+    winCwdPromiseQueue = []
+    pending.forEach(p => p.resolve(null))
+  })
+}
+
+function queryWinCwd(pid: number): Promise<string | null> {
+  return new Promise((resolve) => {
+    if (!IS_WIN) {
+      resolve(null)
+      return
+    }
+    try {
+      initWinCwdPowerShell()
+      if (!winCwdPowerShell || !winCwdPowerShell.stdin) {
+        resolve(null)
+        return
+      }
+      winCwdPromiseQueue.push({ resolve })
+      winCwdPowerShell.stdin.write(pid.toString() + "\n")
+    } catch {
+      resolve(null)
+    }
+  })
+}
+
+// Linux/macOS leaf child PID resolution
+async function getLeafPidUnix(parentPid: number): Promise<number> {
+  try {
+    const files = await fsp.readdir('/proc')
+    const pids = files.filter(f => /^\d+$/.test(f)).map(Number)
+
+    const statResults = await Promise.all(
+      pids.map(async (pid) => {
+        try {
+          const statStr = await fsp.readFile(`/proc/${pid}/stat`, 'utf8')
+          const lastParen = statStr.lastIndexOf(')')
+          if (lastParen === -1) return null
+          const rest = statStr.substring(lastParen + 2).trim().split(/\s+/)
+          const ppid = Number(rest[1]) // PPID is the second field after the command name
+          return { pid, ppid }
+        } catch {
+          return null
+        }
+      })
+    )
+
+    const parentToChildren: Record<number, number[]> = {}
+    for (const res of statResults) {
+      if (res) {
+        if (!parentToChildren[res.ppid]) parentToChildren[res.ppid] = []
+        parentToChildren[res.ppid].push(res.pid)
+      }
+    }
+
+    let currentPid = parentPid
+    while (true) {
+      const children = parentToChildren[currentPid]
+      if (!children || children.length === 0) {
+        break
+      }
+      currentPid = Math.max(...children)
+    }
+
+    return currentPid
+  } catch {
+    return parentPid
+  }
+}
+
 // Read the current working directory of a pty's foreground process.
 //
-// Linux:   readlink /proc/<pid>/cwd  — exact, follows nested child processes.
-// Windows: /proc doesn't exist. We return the initial spawn cwd as best-effort.
-//          True cwd tracking of arbitrary child processes on Windows requires
-//          kernel-level APIs (NtQueryInformationProcess). The initial cwd covers
-//          the common case (cd commands update PS1 but not the parent process).
+// Linux:   walk process tree to find deepest child, read /proc/<leaf>/cwd
+// Windows: query persistent PowerShell process reading PEB memory of leaf process
 ipcMain.handle('pty:cwd', async (_e, panelId: string) => {
   const s = ptys.get(panelId)
   if (!s) return { ok: false, error: 'no pty' }
   if (IS_WIN) {
-    // Return the last known cwd (set at spawn time; updated if the renderer
-    // explicitly calls pty:spawn again with a new cwd).
-    const cwd = ptyCwds.get(panelId)
-    return cwd ? { ok: true, cwd } : { ok: false, error: 'cwd unknown' }
+    const cwd = await queryWinCwd(s.proc.pid)
+    if (cwd) {
+      ptyCwds.set(panelId, cwd)
+      return { ok: true, cwd }
+    }
+    const fallback = ptyCwds.get(panelId)
+    return fallback ? { ok: true, cwd: fallback } : { ok: false, error: 'cwd unknown' }
   }
   try {
-    const cwd = await fsp.readlink(`/proc/${s.proc.pid}/cwd`)
+    const leafPid = await getLeafPidUnix(s.proc.pid)
+    const cwd = await fsp.readlink(`/proc/${leafPid}/cwd`)
     return { ok: true, cwd }
   } catch (err) {
     return { ok: false, error: (err as Error).message }
@@ -730,6 +1138,20 @@ ipcMain.handle('fs:write-asset', async (_e, args: { data: string; filename?: str
 
 ipcMain.handle('fs:asset-dir', () => join(app.getPath('userData'), 'assets'))
 
+ipcMain.handle('fs:import-as-asset', async (_e, filepath: string) => {
+  try {
+    const assetsDir = join(app.getPath('userData'), 'assets')
+    await fsp.mkdir(assetsDir, { recursive: true })
+    const ext = filepath.split('.').pop() || 'png'
+    const name = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`
+    const dest = join(assetsDir, name)
+    await fsp.copyFile(filepath, dest)
+    return { ok: true, filename: name, path: dest }
+  } catch (err) {
+    return { ok: false, error: (err as Error).message }
+  }
+})
+
 // ---- git status ----
 const runGit = (cwd: string, args: string[], timeoutMs = 5000): Promise<{ ok: boolean; stdout: string; stderr: string; code: number | null }> =>
   new Promise(resolve => {
@@ -799,6 +1221,53 @@ ipcMain.handle('shell:reveal', async (_e, path: string) => {
 ipcMain.handle('shell:trash', async (_e, path: string) => {
   try { await shell.trashItem(path); return { ok: true } }
   catch (err) { return { ok: false, error: (err as Error).message } }
+})
+ipcMain.handle('fs:search-paths', async (_e, args: { root: string; query: string }) => {
+  const results: string[] = []
+  const q = args.query.toLowerCase()
+  if (!args.root || !q) return { ok: true, results }
+  const visited = new Set<string>()
+  const MAX_DEPTH = 20
+
+  async function walk(dir: string, depth: number) {
+    if (depth > MAX_DEPTH) return
+    try {
+      const entries = await fsp.readdir(dir, { withFileTypes: true })
+      for (const entry of entries) {
+        if (entry.name.startsWith('.') && entry.name !== '.gitignore' && entry.name !== '.env.example') continue
+        if (entry.name === 'node_modules' || entry.name === '.git') continue
+
+        const fullPath = join(dir, entry.name)
+        if (entry.name.toLowerCase().includes(q)) {
+          results.push(fullPath)
+        }
+        if (results.length >= 1000) return
+
+        if (entry.isDirectory()) {
+          let real: string
+          try {
+            real = await fsp.realpath(fullPath)
+          } catch {
+            real = fullPath
+          }
+          if (!visited.has(real)) {
+            visited.add(real)
+            await walk(fullPath, depth + 1)
+          }
+        }
+      }
+    } catch { /* ignore */ }
+  }
+
+  try {
+    const rootReal = await fsp.realpath(args.root)
+    visited.add(rootReal)
+  } catch {
+    visited.add(args.root)
+  }
+
+  await walk(args.root, 0)
+  return { ok: true, results }
 })
 
 // ---- ripgrep / grep wrapper for global search ----
@@ -1056,7 +1525,7 @@ ipcMain.handle('git:status', async (_e, repoRoot: string) => {
   const [branchRes, upstreamRes, statusRes, worktreeRes] = await Promise.all([
     runGit(repoRoot, ['symbolic-ref', '--short', 'HEAD']),
     runGit(repoRoot, ['rev-list', '--left-right', '--count', 'HEAD...@{u}']),
-    runGit(repoRoot, ['status', '--porcelain=v1']),
+    runGit(repoRoot, ['status', '--porcelain=v1', '--ignored']),
     runGit(repoRoot, ['worktree', 'list', '--porcelain'])
   ])
 
@@ -1100,6 +1569,7 @@ ipcMain.handle('git:status', async (_e, repoRoot: string) => {
 let codeServerProc: ChildProcess | null = null
 let codeServerPort: number | null = null
 let codeServerStarting: Promise<{ ok: boolean; port?: number; url?: string; error?: string }> | null = null
+let codeServerSessionToken = ''
 
 // code-server candidate paths — platform-specific.
 // On Windows, code-server is typically installed as a .cmd wrapper in
@@ -1211,20 +1681,27 @@ const startCodeServer = async (): Promise<{ ok: boolean; port?: number; url?: st
       await fsp.mkdir(userDataDir, { recursive: true })
       await fsp.mkdir(extDir, { recursive: true })
       // Seed default settings so Ctrl+Wheel zooms editor font (VSCode's
-      // editor.mouseWheelZoom). Only seed on first run — never clobber user edits.
+      // editor.mouseWheelZoom) and ensure new windows open fresh without the welcome screen.
       const userDir = join(userDataDir, 'User')
       const settingsPath = join(userDir, 'settings.json')
       try {
-        await fsp.access(settingsPath)
-      } catch {
+        await fsp.mkdir(userDir, { recursive: true })
+        let currentSettings: Record<string, any> = {
+          'editor.mouseWheelZoom': true,
+          'workbench.startupEditor': 'none',
+          'window.restoreWindows': 'none'
+        }
         try {
-          await fsp.mkdir(userDir, { recursive: true })
-          await fsp.writeFile(settingsPath, JSON.stringify({
-            'editor.mouseWheelZoom': true,
-            'workbench.startupEditor': 'none'
-          }, null, 2), 'utf8')
-        } catch { /* non-fatal */ }
-      }
+          const raw = await fsp.readFile(settingsPath, 'utf8')
+          currentSettings = { ...currentSettings, ...JSON.parse(raw) }
+        } catch { /* ignore if missing/malformed */ }
+        
+        // Force session settings to prevent reopening the last active folder
+        currentSettings['window.restoreWindows'] = 'none'
+        currentSettings['workbench.startupEditor'] = 'none'
+        
+        await fsp.writeFile(settingsPath, JSON.stringify(currentSettings, null, 2), 'utf8')
+      } catch { /* non-fatal */ }
       // Stable port across restarts — cookies and OAuth callbacks are tied to origin,
       // so a random port every launch wipes login sessions.
       const port = await getStablePort(userDataDir)
@@ -1236,7 +1713,8 @@ const startCodeServer = async (): Promise<{ ok: boolean; port?: number; url?: st
         '--disable-telemetry',
         '--disable-update-check',
         '--user-data-dir', userDataDir,
-        '--extensions-dir', extDir
+        '--extensions-dir', extDir,
+        '--ignore-last-opened'
       ]
       const proc = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PASSWORD: password } })
       codeServerProc = proc
@@ -1308,6 +1786,7 @@ const startCodeServer = async (): Promise<{ ok: boolean; port?: number; url?: st
       }
 
       if (sessionToken) {
+        codeServerSessionToken = sessionToken
         await csSession.cookies.set({
           url: `http://127.0.0.1:${port}`,
           name: 'code-server-session',
@@ -1351,6 +1830,38 @@ ipcMain.handle('codeserver:stop', () => {
   codeServerPort = null
   return { ok: true }
 })
+
+ipcMain.handle('codeserver:authenticate-partition', async (_e, partitionName) => {
+  if (!codeServerPort || !codeServerSessionToken) {
+    return { ok: false, error: 'code-server not running or session token not available' }
+  }
+  const csSession = session.fromPartition(partitionName)
+  try {
+    const allCookies = await csSession.cookies.get({})
+    for (const c of allCookies) {
+      const url = `${c.secure ? 'https' : 'http'}://${c.domain.startsWith('.') ? c.domain.slice(1) : c.domain}${c.path}`
+      await csSession.cookies.remove(url, c.name)
+    }
+    await csSession.cookies.set({
+      url: `http://127.0.0.1:${codeServerPort}`,
+      name: 'code-server-session',
+      value: codeServerSessionToken,
+      path: '/'
+    })
+    await csSession.cookies.set({
+      url: `http://localhost:${codeServerPort}`,
+      name: 'code-server-session',
+      value: codeServerSessionToken,
+      path: '/'
+    })
+    return { ok: true }
+  } catch (err) {
+    console.error(`Failed to authenticate partition ${partitionName}:`, err)
+    return { ok: false, error: (err as Error).message }
+  }
+})
+
+
 
 app.on('before-quit', () => {
   if (codeServerProc) {

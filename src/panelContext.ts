@@ -47,21 +47,33 @@ export const readPanelContext = (p: Panel): PanelContext => {
 }
 
 // Which panel does the sidebar follow right now?
-//   1. single selection → that panel
-//   2. last-focused panel (sticky)
-//   3. nearest non-region panel by canvas center (fallback)
+//   1. single selection → that panel (if editor or terminal)
+//   2. last-focused editor/terminal panel from MRU/history (sticky)
+//   3. fallback → first editor/terminal panel
 export const getActiveContextPanel = (): Panel | null => {
   const s = useWorkspaceStore.getState()
+  
+  // 1. Single selection if it's an editor or terminal
   if (s.selectedPanelIds.length === 1) {
     const p = s.panels[s.selectedPanelIds[0]]
-    if (p && p.type !== 'region') return p
+    if (p && (p.type === 'editor' || p.type === 'terminal')) return p
   }
+
+  // 2. Check MRU order for the most recently active editor or terminal
+  const mruOrder = s.panelMruOrder || []
+  for (const id of mruOrder) {
+    const p = s.panels[id]
+    if (p && (p.type === 'editor' || p.type === 'terminal')) return p
+  }
+
+  // 3. Last focused panel if it is an editor or terminal
   if (s.lastFocusedPanelId) {
     const p = s.panels[s.lastFocusedPanelId]
-    if (p && p.type !== 'region') return p
+    if (p && (p.type === 'editor' || p.type === 'terminal')) return p
   }
-  // Fallback: pick any non-region panel (first one).
-  const any = Object.values(s.panels).find(p => p.type !== 'region')
+
+  // 4. Fallback: Find any editor or terminal panel in the store
+  const any = Object.values(s.panels).find(p => p.type === 'editor' || p.type === 'terminal')
   return any || null
 }
 

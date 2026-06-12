@@ -22,7 +22,7 @@ const EditorPanel: React.FC<Props> = ({ panel }) => {
   const settings = (panel.settings || {}) as EditorSettings
   const [mode, setMode] = useState<Mode>('loading')
   const [serverUrl, setServerUrl] = useState<string>('')
-  const [folderPath, setFolderPath] = useState<string | undefined>(settings.folderPath)
+  const folderPath = settings.folderPath
   const [startError, setStartError] = useState<string>('')
 
   // Try to bring up code-server on mount. Falls back to install prompt or monaco fallback.
@@ -33,7 +33,15 @@ const EditorPanel: React.FC<Props> = ({ panel }) => {
     (async () => {
       const status = await api.status()
       if (cancelled) return
+
+      const authenticate = async () => {
+        if (api.authenticatePartition) {
+          await api.authenticatePartition('persist:wts-code-server-' + panel.id)
+        }
+      }
+
       if (status.running && status.url) {
+        await authenticate()
         setServerUrl(status.url)
         setMode('codeserver')
         return
@@ -45,6 +53,7 @@ const EditorPanel: React.FC<Props> = ({ panel }) => {
       const r = await api.start()
       if (cancelled) return
       if (r.ok && r.url) {
+        await authenticate()
         setServerUrl(r.url)
         setMode('codeserver')
       } else {
@@ -53,11 +62,7 @@ const EditorPanel: React.FC<Props> = ({ panel }) => {
       }
     })()
     return () => { cancelled = true }
-  }, [])
-
-  // Folder picking now happens inside code-server itself (File → Open Folder).
-  // Persist any folder picked via panel context menu in the future; for now no-op here.
-  void setFolderPath
+  }, [panel.id])
 
   if (mode === 'loading') {
     return <div style={loadingStyle}>starting code-server…</div>
@@ -88,9 +93,7 @@ const EditorPanel: React.FC<Props> = ({ panel }) => {
   }
 
   // codeserver mode
-  const url = folderPath
-    ? `${serverUrl}/?folder=${encodeURIComponent(folderPath)}`
-    : serverUrl
+  const filePath = settings.filePath
 
   const onDragOver = (e: React.DragEvent) => {
     if (e.dataTransfer.types.includes('application/x-wts-path')) {
@@ -103,13 +106,20 @@ const EditorPanel: React.FC<Props> = ({ panel }) => {
     if (!raw) return
     e.preventDefault()
     try {
-      const data = JSON.parse(raw) as { path: string; isDir: boolean }
-      const dir = data.isDir ? data.path : (await window.electronAPI?.file?.dirname(data.path)) || data.path
-      setFolderPath(dir)
-      useWorkspaceStore.getState().updatePanel(panel.id, {
-        folderPath: dir,
-        settings: { ...(panel.settings || {}), folderPath: dir }
-      }, { skipHistory: true })
+      const data = JSON.parse(raw)
+      const items = data.items ? (data.items as Array<{ path: string; isDir: boolean }>) : [data]
+      if (items && items.length > 0) {
+        const item = items[0]
+        const dir = item.isDir ? item.path : (await window.electronAPI?.file?.dirname(item.path)) || item.path
+        useWorkspaceStore.getState().updatePanel(panel.id, {
+          folderPath: dir,
+          settings: {
+            ...(panel.settings || {}),
+            folderPath: dir,
+            filePath: item.isDir ? undefined : item.path
+          }
+        }, { skipHistory: true })
+      }
     } catch { /* ignore */ }
   }
 
@@ -122,12 +132,17 @@ const EditorPanel: React.FC<Props> = ({ panel }) => {
     >
       <CodeServerWebview
         panelId={panel.id}
-        url={url}
+        serverUrl={serverUrl}
+        folderPath={folderPath}
+        filePath={filePath}
         onFolderChanged={(dir) => {
-          setFolderPath(dir)
           useWorkspaceStore.getState().updatePanel(panel.id, {
             folderPath: dir,
-            settings: { ...(panel.settings || {}), folderPath: dir }
+            settings: {
+              ...(panel.settings || {}),
+              folderPath: dir,
+              filePath: undefined
+            }
           }, { skipHistory: true })
         }}
       />
@@ -149,10 +164,43 @@ const getEditorPreloadPath = (): Promise<string> => {
   return editorPreloadPromise
 }
 
-const CodeServerWebview: React.FC<{ panelId: string; url: string; onFolderChanged: (dir: string) => void }> = ({ panelId, url, onFolderChanged }) => {
+const CodeServerWebview: React.FC<{
+  panelId: string
+  serverUrl: string
+  folderPath?: string
+  filePath?: string
+  onFolderChanged: (dir: string) => void
+}> = ({ panelId, serverUrl, folderPath, filePath, onFolderChanged }) => {
   const wvRef = useRef<HTMLElement | null>(null)
   const lastFolderRef = useRef<string>('')
   const [preloadPath, setPreloadPath] = useState<string | null>(null)
+
+  // Track the initial URL for the webview mount
+  const [initialUrl] = useState<string>(() => {
+    return folderPath
+      ? `${serverUrl}/?folder=${encodeURIComponent(folderPath)}${filePath ? `&file=${encodeURIComponent(filePath)}` : ''}&isCodeServer=true`
+      : `${serverUrl}/?folder=&isCodeServer=true`
+  })
+
+  // Compute the latest URL based on props
+  const currentUrl = folderPath
+    ? `${serverUrl}/?folder=${encodeURIComponent(folderPath)}${filePath ? `&file=${encodeURIComponent(filePath)}` : ''}&isCodeServer=true`
+    : `${serverUrl}/?folder=&isCodeServer=true`
+
+  // Use a ref to prevent running the loadURL effect on the initial render
+  const isFirstRender = useRef(true)
+
+  // Direct Electron webview navigation to bypass React custom element attribute reconciliation issues
+  useEffect(() => {
+    if (isFirstRender.current) {
+      isFirstRender.current = false
+      return
+    }
+    const webview = wvRef.current as any
+    if (webview?.loadURL && folderPath) {
+      webview.loadURL(currentUrl)
+    }
+  }, [currentUrl, folderPath])
 
   useEffect(() => {
     let cancelled = false
@@ -185,7 +233,9 @@ const CodeServerWebview: React.FC<{ panelId: string; url: string; onFolderChange
       }
     }
     const onNav = (e: Event) => sync((e as unknown as { url: string }).url)
-    const onDomReady = () => sync()
+    const onDomReady = () => {
+      sync()
+    }
     // Webview-preload forwards Ctrl+= / Ctrl+- / Ctrl+0 as ipc-message channel='shortcut'.
     // Apply zoom directly on the webview rather than letting code-server's own zoom kick in,
     // because Chromium's setZoomLevel feels more responsive and persists per-panel.
@@ -195,10 +245,21 @@ const CodeServerWebview: React.FC<{ panelId: string; url: string; onFolderChange
         // User clicked/typed inside code-server. Switch selection + body-active to THIS
         // panel so any other panel's stale selection ring goes away.
         const s = useWorkspaceStore.getState()
+        const panel = s.panels[panelId]
+        if (!panel) return
         if (s.headerActivePanelId) s.setHeaderActivePanel(null)
         if (s.bodyActivePanelId !== panelId) s.setBodyActivePanel(panelId)
         if (s.selectedPanelIds.length !== 1 || s.selectedPanelIds[0] !== panelId) {
           s.selectPanel(panelId)
+        }
+        if (panel.type !== 'region' && !panel.pinFront && !panel.pinBack) {
+          const otherZs = Object.values(s.panels)
+            .filter(p => p.id !== panel.id && !p.pinFront && !p.pinBack)
+            .map(p => p.zIndex || 1)
+          const maxOtherZ = otherZs.length > 0 ? Math.max(...otherZs) : 1
+          if (panel.zIndex === undefined || panel.zIndex <= maxOtherZ) {
+            s.updatePanel(panel.id, { zIndex: maxOtherZ + 1 }, { skipHistory: true })
+          }
         }
         return
       }
@@ -239,9 +300,9 @@ const CodeServerWebview: React.FC<{ panelId: string; url: string; onFolderChange
   if (preloadPath === null) return <div style={{ flex: 1, minHeight: 0, background: '#1e1e1e' }} />
   const props: Record<string, unknown> = {
     ref: setRef,
-    src: url,
+    src: initialUrl,
     allowpopups: 'true',
-    partition: 'persist:wts-code-server',
+    partition: 'persist:wts-code-server-' + panelId,
     style: { flex: 1, minHeight: 0, display: 'flex' }
   }
   if (preloadPath) props.preload = preloadPath
@@ -527,7 +588,7 @@ const InstallPrompt: React.FC<{ error: string; onRetry: () => Promise<void>; onF
                   1. Go to the <a href="https://github.com/coder/code-server/releases" target="_blank" rel="noreferrer" style={{ color: 'var(--selection-color, #4dabe8)' }}>code-server GitHub Releases</a> page.<br/>
                   2. Download the latest Windows release zip (e.g. <code>code-server-*-windows-amd64.zip</code>).<br/>
                   3. Extract it and place the folder in your Program Files directory.<br/>
-                  4. Add the extracted folder's <code>bin/</code> folder to your Windows system environment variables <strong>PATH</strong>.
+                  4. Add the extracted folder&apos;s <code>bin/</code> folder to your Windows system environment variables <strong>PATH</strong>.
                 </div>
               )}
             </div>
@@ -571,7 +632,7 @@ const InstallPrompt: React.FC<{ error: string; onRetry: () => Promise<void>; onF
           onClick={onFallback}
           disabled={isChecking}
         >
-          Use Deck's built-in editor
+          Use Deck&apos;s built-in editor
         </button>
       </div>
 
@@ -640,11 +701,23 @@ const MonacoFallback: React.FC<{ panel: PanelType }> = ({ panel }) => {
   const editorRef = useRef<monacoNS.editor.IStandaloneCodeEditor | null>(null)
   const lastSavedRef = useRef<string>(settings.content ?? '')
 
+  // Create stable refs to avoid stale closures in handleMount commands
+  const contentRef = useRef(content)
+  const filePathRef = useRef(filePath)
+  const dirtyRef = useRef(dirty)
+
+  useEffect(() => { contentRef.current = content }, [content])
+  useEffect(() => { filePathRef.current = filePath }, [filePath])
+  useEffect(() => { dirtyRef.current = dirty }, [dirty])
+
   const persist = useCallback((next: Partial<EditorSettings>) => {
     useWorkspaceStore.getState().updatePanel(panel.id, {
       settings: { ...(panel.settings || {}), ...next }
     }, { skipHistory: true })
   }, [panel.id, panel.settings])
+
+  const persistRef = useRef(persist)
+  useEffect(() => { persistRef.current = persist }, [persist])
 
   useEffect(() => {
     let cancelled = false
@@ -673,33 +746,34 @@ const MonacoFallback: React.FC<{ panel: PanelType }> = ({ panel }) => {
   const doSave = useCallback(async (saveAs = false) => {
     const api = window.electronAPI?.file
     if (!api) return
-    let target = filePath
+    let target = filePathRef.current
     if (!target || saveAs) {
       const r = await api.saveDialog({ suggestedName: basenameOf(target) })
       if (!r.ok || !r.path) return
       target = r.path
     }
-    const w = await api.write(target, content)
+    const currentContent = contentRef.current
+    const w = await api.write(target, currentContent)
     if (!w.ok) { flash(`save failed: ${w.error}`); return }
     setFilePath(target); setLanguage(detectLang(target))
-    lastSavedRef.current = content
+    lastSavedRef.current = currentContent
     setDirty(false)
-    persist({ filePath: target, content, language: detectLang(target) })
+    persistRef.current({ filePath: target, content: currentContent, language: detectLang(target) })
     flash('saved')
-  }, [filePath, content, persist])
+  }, [])
 
   const doOpen = useCallback(async () => {
     const api = window.electronAPI?.file
     if (!api) return
-    if (dirty && !window.confirm('Discard unsaved changes?')) return
+    if (dirtyRef.current && !window.confirm('Discard unsaved changes?')) return
     const r = await api.openDialog()
     if (!r.ok || !r.path) return
     const read = await api.read(r.path)
     if (!read.ok || read.content === undefined) { flash(`read failed: ${read.error}`); return }
     setFilePath(r.path); setContent(read.content); setLanguage(detectLang(r.path))
     lastSavedRef.current = read.content; setDirty(false)
-    persist({ filePath: r.path, content: read.content, language: detectLang(r.path) })
-  }, [dirty, persist])
+    persistRef.current({ filePath: r.path, content: read.content, language: detectLang(r.path) })
+  }, [])
 
   const handleMount: OnMount = (editor, monaco: Monaco) => {
     editorRef.current = editor

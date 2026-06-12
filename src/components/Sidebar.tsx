@@ -25,16 +25,20 @@ const Sidebar: React.FC = () => {
   const hiddenSections = useWorkspaceStore(s => s.hiddenSidebarSections)
   const toggleSidebarSectionHidden = useWorkspaceStore(s => s.toggleSidebarSectionHidden)
   const [headerMenu, setHeaderMenu] = useState<{ x: number; y: number } | null>(null)
-  const panels = useWorkspaceStore(s => s.panels)
-  const lastFocusedPanelId = useWorkspaceStore(s => s.lastFocusedPanelId)
+  const activePanelContextKey = useWorkspaceStore(s => {
+    const p = s.lastFocusedPanelId ? s.panels[s.lastFocusedPanelId] : null
+    if (!p) return null
+    return `${p.id}-${p.type}-${(p.settings as any)?.filePath || ''}-${(p.settings as any)?.folderPath || ''}-${(p.settings as any)?.cwd || ''}`
+  })
   const selectedPanelIds = useWorkspaceStore(s => s.selectedPanelIds)
+  const sidebarWidth = useWorkspaceStore(s => s.sidebarWidth)
+  const setSidebarWidth = useWorkspaceStore(s => s.setSidebarWidth)
 
-  // Recompute active context whenever any context-relevant input changes.
   const activeCtx = useMemo(() => {
     const p = getActiveContextPanel()
     return p ? readPanelContext(p) : null
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [panels, lastFocusedPanelId, selectedPanelIds])
+  }, [activePanelContextKey, selectedPanelIds])
 
   // Resolve project/repo roots in main when the active panel changes.
   useEffect(() => {
@@ -57,8 +61,27 @@ const Sidebar: React.FC = () => {
   const repoRoot = sidebarPin.git || activeCtx?.repoRoot
   const gitPinned = !!sidebarPin.git
 
+
+
+  const handleResizerMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault()
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      const hasMargin = document.querySelector('.app.has-chrome, .app.has-statusbar') !== null
+      const offset = hasMargin ? 10 : 0
+      const nextWidth = Math.max(200, Math.min(800, moveEvent.clientX - offset))
+      setSidebarWidth(nextWidth)
+    }
+    const onMouseUp = () => {
+      document.removeEventListener('mousemove', onMouseMove)
+      document.removeEventListener('mouseup', onMouseUp)
+    }
+    document.addEventListener('mousemove', onMouseMove)
+    document.addEventListener('mouseup', onMouseUp)
+  }
+
   return (
-    <div className="sidebar">
+    <div className="sidebar" style={{ width: sidebarWidth }}>
+      <div className="sidebar-resizer" onMouseDown={handleResizerMouseDown} />
       <div
         className="sidebar-tabs"
         onContextMenu={(e) => {
@@ -187,7 +210,12 @@ const HEALTH_COLOR: Record<string, string> = {
 }
 
 const OutlineEmbed: React.FC = () => {
-  const { panels, activeTabId, tabs, selectedPanelIds, selectPanel, switchTab } = useWorkspaceStore()
+  const panels = useWorkspaceStore(s => s.panels)
+  const activeTabId = useWorkspaceStore(s => s.activeTabId)
+  const tabs = useWorkspaceStore(s => s.tabs)
+  const selectedPanelIds = useWorkspaceStore(s => s.selectedPanelIds)
+  const selectPanel = useWorkspaceStore(s => s.selectPanel)
+  const switchTab = useWorkspaceStore(s => s.switchTab)
   const [query, setQuery] = useState('')
   const [activeTypes, setActiveTypes] = useState<Set<Panel['type']>>(new Set())
   const [focusedIdx, setFocusedIdx] = useState(-1)

@@ -109,6 +109,22 @@ const PanelContextMenu: React.FC<Props> = ({ panel, x, y, onClose, onRename }) =
       )}
 
       {/* ── Core actions ── */}
+      <button className="ctx-item" onClick={run(() => {
+        let page = 'panels-spawn'
+        if (panel.type === 'region') page = 'regions-grouping'
+        else if (panel.type === 'terminal') page = 'terminal-switcher'
+        else if (panel.type === 'browser') page = 'browser-guide'
+        else if (panel.type === 'editor') page = 'editor-guide'
+        useWorkspaceStore.getState().openCodexToPage(page)
+        const panelEl = document.querySelector(`.panel[data-panel-id="${panel.id}"]`) as HTMLElement | null
+        const headerEl = panelEl?.querySelector('.panel-header') as HTMLElement | null
+        if (headerEl) {
+          headerEl.classList.add('visual-flash')
+          setTimeout(() => { headerEl.classList.remove('visual-flash') }, 1600)
+        }
+      })}>
+        <span>What is this?</span><span className="ctx-kbd">?</span>
+      </button>
       <button className="ctx-item" onClick={() => { onRename(); onClose() }}>
         <span>Rename</span><span className="ctx-kbd">F2</span>
       </button>

@@ -1,39 +1,36 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { useWorkspaceStore } from '../store/workspaceStore'
-import { TerminalShellType, ShellConfig, SHELL_CONFIGS, getShellOptions } from '../types/terminalShells'
+import { TerminalShellType, SHELL_CONFIGS, getShellOptions } from '../types/terminalShells'
 import { executeWorkspaceCommand, createPanelAtViewportCenter } from '../workspaceCommands'
 import TabContextMenu from './TabContextMenu'
 import './WorkspaceChrome.css'
 
 const WorkspaceChrome: React.FC = () => {
-  const {
-    panels,
-    tabs,
-    activeTabId,
-    viewport,
-    selectedPanelIds,
-    minimapVisible,
-    sidebarOpen,
-    createTab,
-    switchTab,
-    closeTab,
-    renameTab,
-    reorderTab,
-    movePanelToTab,
-    exportWorkspace,
-    importWorkspace,
-    toggleSidebar,
-    setBarsVisible,
-    toggleHelp,
-    toggleCommandPalette,
-    toggleChrome,
-    canvasPresets,
-    overwriteCanvasPreset,
-    saveCanvasPreset,
-    saveBuiltinPreset,
-    prefs,
-    markTabSaved
-  } = useWorkspaceStore()
+  const tabs = useWorkspaceStore(s => s.tabs)
+  const activeTabId = useWorkspaceStore(s => s.activeTabId)
+  const selectedPanelIds = useWorkspaceStore(s => s.selectedPanelIds)
+  const minimapVisible = useWorkspaceStore(s => s.minimapVisible)
+  const sidebarOpen = useWorkspaceStore(s => s.sidebarOpen)
+  const createTab = useWorkspaceStore(s => s.createTab)
+  const switchTab = useWorkspaceStore(s => s.switchTab)
+  const closeTab = useWorkspaceStore(s => s.closeTab)
+  const renameTab = useWorkspaceStore(s => s.renameTab)
+  const reorderTab = useWorkspaceStore(s => s.reorderTab)
+  const movePanelToTab = useWorkspaceStore(s => s.movePanelToTab)
+  const exportWorkspace = useWorkspaceStore(s => s.exportWorkspace)
+  const importWorkspace = useWorkspaceStore(s => s.importWorkspace)
+  const toggleSidebar = useWorkspaceStore(s => s.toggleSidebar)
+  const setBarsVisible = useWorkspaceStore(s => s.setBarsVisible)
+  const toggleHelp = useWorkspaceStore(s => s.toggleHelp)
+  const toggleCommandPalette = useWorkspaceStore(s => s.toggleCommandPalette)
+  const toggleChrome = useWorkspaceStore(s => s.toggleChrome)
+  const canvasPresets = useWorkspaceStore(s => s.canvasPresets)
+  const overwriteCanvasPreset = useWorkspaceStore(s => s.overwriteCanvasPreset)
+  const saveCanvasPreset = useWorkspaceStore(s => s.saveCanvasPreset)
+  const saveBuiltinPreset = useWorkspaceStore(s => s.saveBuiltinPreset)
+  const prefs = useWorkspaceStore(s => s.prefs)
+  const markTabSaved = useWorkspaceStore(s => s.markTabSaved)
+  const zoom = useWorkspaceStore(s => s.viewport.zoom)
 
 
   const [showTermDropdown, setShowTermDropdown] = useState(false)
@@ -210,10 +207,18 @@ const WorkspaceChrome: React.FC = () => {
     e.target.value = ''
   }
 
-  const selectedPanels = selectedPanelIds.map(id => panels[id]).filter(Boolean)
-  const selectedIsFront = selectedPanels.length > 0 && selectedPanels.every(panel => panel.pinFront)
-  const selectedLocked = selectedPanels.length > 0 && selectedPanels.every(panel => panel.locked)
-  const selectedMinimized = selectedPanels.length > 0 && selectedPanels.every(panel => panel.minimized)
+  const selectedIsFront = useWorkspaceStore(s => {
+    const targets = s.selectedPanelIds.map(id => s.panels[id]).filter(Boolean)
+    return targets.length > 0 && targets.every(panel => panel.pinFront)
+  })
+  const selectedLocked = useWorkspaceStore(s => {
+    const targets = s.selectedPanelIds.map(id => s.panels[id]).filter(Boolean)
+    return targets.length > 0 && targets.every(panel => panel.locked)
+  })
+  const selectedMinimized = useWorkspaceStore(s => {
+    const targets = s.selectedPanelIds.map(id => s.panels[id]).filter(Boolean)
+    return targets.length > 0 && targets.every(panel => panel.minimized)
+  })
 
   return (
     <div className="workspace-chrome">
@@ -383,9 +388,9 @@ const WorkspaceChrome: React.FC = () => {
           onClick={toggleChrome}
           title="Hide top bar (Ctrl+\\)"
         >▴</button>
-        <span className="chrome-readout">{Math.round(viewport.zoom * 100)}%</span>
+        <span className="chrome-readout">{Math.round(zoom * 100)}%</span>
         <span className="chrome-readout">{selectedPanelIds.length} sel</span>
-        {selectedPanels.length > 0 && (
+        {selectedPanelIds.length > 0 && (
           <div className="selection-actions">
             <button
               className={`chrome-chip ${selectedIsFront ? 'active' : ''}`}

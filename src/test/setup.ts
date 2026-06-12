@@ -1,5 +1,6 @@
 // Global test setup — runs before every test file.
 import '@testing-library/jest-dom'
+import { vi } from 'vitest'
 
 // Mock Electron APIs. The store's dualStorage gracefully falls back to
 // localStorage when window.electronAPI is undefined (via optional chaining).

@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from "react"
 import { createPortal } from "react-dom"
-import { useWorkspaceStore, CanvasPreset, WorkspaceState } from "../store/workspaceStore"
+import { useWorkspaceStore, CanvasPreset, WorkspaceState, DefaultShellSetting } from "../store/workspaceStore"
 import { serializeKeyEvent } from "../App"
 import "./GlobalSearch.css"
 
@@ -209,8 +209,6 @@ const SettingsPane: React.FC = () => {
 	const [tempBgColor, setTempBgColor] = useState(prefs.canvasBgColor || "#1f2024")
 	const [shortcutSearch, setShortcutSearch] = useState("")
 	const [settingsSearchQuery, setSettingsSearchQuery] = useState("")
-	const [guideOpen, setGuideOpen] = useState(false)
-	const [shortcutRefOpen, setShortcutRefOpen] = useState(false)
 	const [undoToast, setUndoToast] = useState<{ visible: boolean; message: string; backup: Partial<WorkspaceStorePrefs> } | null>(null)
 	// Current OS platform — used for platform-specific UI copy (e.g. shell path hints).
 	const [platform, setPlatform] = useState<string>('')
@@ -219,6 +217,7 @@ const SettingsPane: React.FC = () => {
 	const [shellPathInput, setShellPathInput] = useState(prefs.defaultTerminalShell || "")
 	const [showShellPathsDropdown, setShowShellPathsDropdown] = useState(false)
 	const shellPathsDropdownRef = useRef<HTMLDivElement>(null)
+	const searchInputRef = useRef<HTMLInputElement>(null)
 
 	useEffect(() => {
 		setShellPathInput(prefs.defaultTerminalShell || "")
@@ -284,7 +283,8 @@ const SettingsPane: React.FC = () => {
 		).length
 	}
 
-	const matchSetting = (label: string, description?: string) => {
+	const matchSetting = (_label: string, _description?: string) => {
+		void (_label || _description);
 		// Always return true so that all options and section headers remain rendered in the DOM.
 		// Styling (highlighting and dimming) is handled dynamically inside the Field component.
 		return true
@@ -304,7 +304,7 @@ const SettingsPane: React.FC = () => {
 		// 1. Create backup of current prefs
 		const backup: Partial<WorkspaceStorePrefs> = {}
 		keys.forEach(k => {
-			backup[k] = prefs[k] as any
+			backup[k] = prefs[k] as never
 		})
 		
 		// 2. Define defaults
@@ -324,7 +324,7 @@ const SettingsPane: React.FC = () => {
 			terminalFontSize: 15,
 			terminalFontFamily: "'JetBrainsMono Nerd Font', 'JetBrains Mono', 'Fira Code', 'SF Mono', 'Cascadia Code', Menlo, monospace",
 			defaultTerminalShell: '',
-			defaultTerminalShellType: '',
+			defaultTerminalShellType: 'remember_last',
 			skipShellSwitchConfirmation: false,
 			terminalScrollback: 10000,
 			browserHomeUrl: 'https://google.com',
@@ -332,6 +332,10 @@ const SettingsPane: React.FC = () => {
 			showCursorReadout: true,
 			doubleClickToCreate: 'none',
 			autoFocusOnCreate: true,
+			autoFocusTerminal: true,
+			autoFocusEditor: true,
+			autoFocusBrowser: true,
+			autoFocusRegion: true,
 			panelHeaderDoubleClick: 'rename',
 			defaultPanelWidthTerminal: 600,
 			defaultPanelHeightTerminal: 400,
@@ -344,7 +348,7 @@ const SettingsPane: React.FC = () => {
 		// 3. Build reset object
 		const updateObj: Partial<WorkspaceStorePrefs> = {}
 		keys.forEach(k => {
-			updateObj[k] = defaults[k] as any
+			updateObj[k] = defaults[k] as never
 		})
 		
 		// Special case for color
@@ -436,13 +440,62 @@ const SettingsPane: React.FC = () => {
 		if (!open) return
 		const esc = (e: KeyboardEvent) => {
 			if (e.key === "Escape") {
+				const active = document.activeElement
+
+				// 1. If currently focused on the search input, blur it and stop propagation
+				if (active === searchInputRef.current) {
+					e.stopPropagation()
+					searchInputRef.current?.blur()
+					return
+				}
+
+				// 2. If focused on any other input element, let it handle Escape locally
+				const isOtherInput = active && (
+					active.tagName === "INPUT" ||
+					active.tagName === "TEXTAREA" ||
+					active.getAttribute("contenteditable") === "true"
+				)
+				if (isOtherInput) return
+
+				// 3. Otherwise, consume event to clear search or close preferences
 				e.stopPropagation()
-				close()
+				if (settingsSearchQuery) {
+					setSettingsSearchQuery("")
+				} else {
+					close()
+				}
 			}
 		}
 		window.addEventListener("keydown", esc, true)
 		return () => window.removeEventListener("keydown", esc, true)
-	}, [open, close])
+	}, [open, close, settingsSearchQuery])
+
+	// Auto-focus search input when typing printable characters
+	useEffect(() => {
+		if (!open) return
+
+		const handleKeyDown = (e: KeyboardEvent) => {
+			if (e.key === "Escape" || e.key === "Tab" || e.key === "Enter") return
+			if (e.key.length !== 1) return
+			if (e.key === " ") return
+			if (e.ctrlKey || e.metaKey || e.altKey) return
+
+			const active = document.activeElement
+			const isInput = active && (
+				active.tagName === "INPUT" ||
+				active.tagName === "TEXTAREA" ||
+				active.getAttribute("contenteditable") === "true"
+			)
+			if (isInput) return
+
+			if (searchInputRef.current) {
+				searchInputRef.current.focus()
+			}
+		}
+
+		window.addEventListener("keydown", handleKeyDown, true)
+		return () => window.removeEventListener("keydown", handleKeyDown, true)
+	}, [open])
 
 	// Capture key combination for remapping.
 	useEffect(() => {
@@ -693,6 +746,7 @@ const SettingsPane: React.FC = () => {
 					<div style={{ position: "relative", display: "flex", alignItems: "center" }}>
 						<span style={{ position: "absolute", left: 12, opacity: 0.5, fontSize: 13 }}>🔍</span>
 						<input
+							ref={searchInputRef}
 							type="text"
 							value={settingsSearchQuery}
 							onChange={(e) => setSettingsSearchQuery(e.target.value)}
@@ -1099,7 +1153,7 @@ const SettingsPane: React.FC = () => {
 															e.stopPropagation()
 															const files = Array.from(e.dataTransfer.files)
 															if (files.length > 0) {
-																const file = files[0]
+																const file = files[0] as File & { path?: string }
 																if (file.path) {
 																	const res = await window.electronAPI.fs.importAsAsset(file.path)
 																	if (res?.ok && res.filename) {
@@ -1474,16 +1528,16 @@ const SettingsPane: React.FC = () => {
 													value={prefs.defaultTerminalShellType ?? ""}
 													onChange={(e) =>
 														updatePrefs({
-															defaultTerminalShellType: e.target.value as any,
+															defaultTerminalShellType: e.target.value as DefaultShellSetting,
 														})
 													}
 													style={inputStyle}
 												>
 													<option value="">Remember Last Used</option>
-													<option value="powershell">PowerShell</option>
-													<option value="cmd">Command Prompt</option>
-													<option value="wsl">WSL</option>
-													<option value="gitbash">Git Bash</option>
+													{platform === 'win32' && <option value="powershell">PowerShell</option>}
+													{platform === 'win32' && <option value="cmd">Command Prompt</option>}
+													{platform === 'win32' && <option value="wsl">WSL</option>}
+													{platform === 'win32' && <option value="gitbash">Git Bash</option>}
 													<option value="custom">Custom Path</option>
 												</select>
 											</Field>
@@ -1668,7 +1722,7 @@ const SettingsPane: React.FC = () => {
 									<>
 										<div className="settings-section-header" style={{ opacity: isSectionMatched(["Show cursor coords in status bar", "Auto-focus on panel create", "Double-click empty canvas to create", "Header double-click action"]) ? 1 : 0.35, transition: "opacity 0.15s ease" }}>
 											<span>Workspace Behavior</span>
-											<button className="settings-reset-btn" onClick={() => resetSection("Workspace Behavior", ["showCursorReadout", "doubleClickToCreate", "autoFocusOnCreate", "panelHeaderDoubleClick"])}>
+											<button className="settings-reset-btn" onClick={() => resetSection("Workspace Behavior", ["showCursorReadout", "doubleClickToCreate", "autoFocusOnCreate", "autoFocusTerminal", "autoFocusEditor", "autoFocusBrowser", "autoFocusRegion", "panelHeaderDoubleClick"])}>
 												Reset Section
 											</button>
 										</div>
@@ -1684,15 +1738,54 @@ const SettingsPane: React.FC = () => {
 											</Field>
 										)}
 										{matchSetting("Auto-focus on panel create", "Automatically zooms and centers the viewport to frame a newly created panel.") && (
-											<Field
-												label="Auto-focus on panel create"
-												description="Automatically zooms and centers the viewport to frame a newly created panel."
-											>
-												<Toggle
-													on={prefs.autoFocusOnCreate !== false}
-													onChange={(v) => updatePrefs({ autoFocusOnCreate: v })}
-												/>
-											</Field>
+											<>
+												<Field
+													label="Auto-focus on panel create"
+													description="Automatically zooms and centers the viewport to frame a newly created panel."
+												>
+													<Toggle
+														on={prefs.autoFocusOnCreate !== false}
+														onChange={(v) => updatePrefs({ autoFocusOnCreate: v })}
+													/>
+												</Field>
+												{prefs.autoFocusOnCreate !== false && (
+													<div className="settings-nested-field" style={{ display: 'flex', flexDirection: 'column', gap: 10, paddingLeft: 16, borderLeft: '2px solid rgba(255,255,255,0.06)', marginBottom: 16 }}>
+														<div style={{ fontSize: 11.5, opacity: 0.6, marginBottom: 2 }}>Configure which panel types trigger auto-focus:</div>
+														
+														<div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+															<span style={{ fontSize: 12 }}>Terminal Panels</span>
+															<Toggle
+																on={prefs.autoFocusTerminal !== false}
+																onChange={(v) => updatePrefs({ autoFocusTerminal: v })}
+															/>
+														</div>
+
+														<div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+															<span style={{ fontSize: 12 }}>Code Editor Panels</span>
+															<Toggle
+																on={prefs.autoFocusEditor !== false}
+																onChange={(v) => updatePrefs({ autoFocusEditor: v })}
+															/>
+														</div>
+
+														<div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+															<span style={{ fontSize: 12 }}>Web Browser Panels</span>
+															<Toggle
+																on={prefs.autoFocusBrowser !== false}
+																onChange={(v) => updatePrefs({ autoFocusBrowser: v })}
+															/>
+														</div>
+
+														<div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+															<span style={{ fontSize: 12 }}>Region Group Panels</span>
+															<Toggle
+																on={prefs.autoFocusRegion !== false}
+																onChange={(v) => updatePrefs({ autoFocusRegion: v })}
+															/>
+														</div>
+													</div>
+												)}
+											</>
 										)}
 										{matchSetting("Double-click empty canvas to create", "Determines which type of panel is spawned automatically at the cursor coordinates when double-clicking on empty canvas space.") && (
 											<Field
@@ -2097,7 +2190,7 @@ const SettingsPane: React.FC = () => {
 														<li>Specify the exact font name in settings, e.g. <code>{"'FiraCode Nerd Font'"}</code>.</li>
 													</ol>
 													<div style={{ marginTop: 6 }}>
-														<strong style={{ color: '#fff' }}>On Windows:</strong> Double-click the font file and choose "Install for all users".
+														<strong style={{ color: '#fff' }}>On Windows:</strong> Double-click the font file and choose &quot;Install for all users&quot;.
 													</div>
 												</div>
 											</div>
@@ -2223,6 +2316,16 @@ const textInputStyle: React.CSSProperties = {
 
 const SettingsSearchContext = React.createContext<{ settingsSearchQuery: string }>({ settingsSearchQuery: "" })
 
+const GLOSSARY_MAP: Record<string, string> = {
+	"UI font size": "fontSize",
+	"Grid spacing": "snapStep",
+	"Canvas background color": "canvasBgColor",
+	"Panel glass opacity": "panelGlassOpacity",
+	"Panel glass blur (px)": "panelGlassBlur",
+	"Terminal Shell Path": "defaultTerminalShell",
+	"Auto-focus on panel create": "autoFocusOnCreate"
+}
+
 const Field: React.FC<{ label: string; description?: string; children: React.ReactNode }> = ({
 	label,
 	description,
@@ -2255,10 +2358,38 @@ const Field: React.FC<{ label: string; description?: string; children: React.Rea
 					textDecoration: description ? "underline dashed rgba(255,255,255,0.3)" : "none",
 					textUnderlineOffset: description ? "3px" : undefined,
 					cursor: description ? "help" : "default",
+					display: "flex",
+					alignItems: "center",
+					justifyContent: "space-between",
+					paddingRight: 8,
+					boxSizing: "border-box"
 				}}
 				title={description}
 			>
-				{label}
+				<span>{label}</span>
+				{GLOSSARY_MAP[label] && (
+					<button
+						type="button"
+						onClick={(e) => {
+							e.stopPropagation()
+							useWorkspaceStore.getState().openCodexToPage('settings-glossary', GLOSSARY_MAP[label])
+						}}
+						style={{
+							background: 'none',
+							border: 'none',
+							color: 'var(--selection-color, #4dabe8)',
+							cursor: 'pointer',
+							fontSize: '11px',
+							padding: '0 4px',
+							opacity: 0.8,
+							display: 'inline-flex',
+							alignItems: 'center'
+						}}
+						title="View in Codex Settings Glossary"
+					>
+						(?)
+					</button>
+				)}
 			</div>
 			<div style={{ flex: 1, display: "flex", alignItems: "center", gap: 8 }}>
 				{children}

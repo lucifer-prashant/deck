@@ -22,6 +22,13 @@ export const confirmPanelsDeletion = (targets: Panel[]): boolean => {
       const tail = count > 0 ? ` (${count} ${count === 1 ? 'panel stays' : 'panels stay'} on canvas)` : ''
       return window.confirm(`Delete region "${p.title}"?${tail}`)
     }
+    if (p.type === 'browser') {
+      const settings = p.settings as Record<string, unknown> | undefined
+      const browserTabs = settings?.browserTabs as Array<{ url: string }> | undefined
+      const isPdf = p.title?.toLowerCase().endsWith('.pdf') || browserTabs?.[0]?.url?.toLowerCase().endsWith('.pdf')
+      const typeName = isPdf ? 'pdf view' : 'browser'
+      return window.confirm(`Delete ${typeName} "${p.title}"?`)
+    }
     return window.confirm(`Delete ${p.type} "${p.title}"?`)
   }
 

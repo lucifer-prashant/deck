@@ -32,7 +32,7 @@ const hasAnyContent = (value: string): boolean => {
   } catch { return false }
 }
 
-const writeTimeouts: Record<string, any> = {}
+const writeTimeouts: Record<string, ReturnType<typeof setTimeout>> = {}
 const pendingWrites: Record<string, { name: string; value: string }> = {}
 
 const dualStorage = {
@@ -112,7 +112,7 @@ const dualStorage = {
   }
 }
 
-;(window as any).__flushWorkspaceBackup = () => dualStorage.flushAll()
+;(window as unknown as { __flushWorkspaceBackup?: () => void }).__flushWorkspaceBackup = () => dualStorage.flushAll()
 
 
 
@@ -303,6 +303,10 @@ export interface WorkspaceState {
     browserLazyLoad: boolean
     doubleClickToCreate: 'none' | 'terminal' | 'editor' | 'browser'
     autoFocusOnCreate: boolean
+    autoFocusTerminal: boolean
+    autoFocusEditor: boolean
+    autoFocusBrowser: boolean
+    autoFocusRegion: boolean
     defaultTerminalShell: string
     defaultTerminalShellType: DefaultShellSetting
     lastSpawnedShellType: TerminalShellType | null
@@ -323,6 +327,8 @@ export interface WorkspaceState {
     customBgColors: Record<string, string>
     panelGlassOpacity: number
     panelGlassBlur: number
+    onboardingComplete: boolean
+    wizardStep: number
   }
   minimapVisible: boolean
   outlinerOpen: boolean
@@ -342,6 +348,7 @@ export interface WorkspaceState {
   lastFocusedPanelId: string | null
   sidebarOpen: boolean
   sidebarSection: SidebarSection
+  sidebarWidth: number
   presetGraveyards: PresetGraveyards
   canvasPresets: Record<string, CanvasPreset>
   viewportBookmarks: Record<number, Viewport>
@@ -373,6 +380,9 @@ export interface WorkspaceState {
   // Cursor world position — updated by Canvas on mouse move, used for panel spawning.
   cursorWorldPos: { x: number; y: number }
   keybindings: Record<string, string>
+  sandboxRestoreViewport: Viewport | null
+  activeCodexPage: string
+  highlightedGlossaryTerm: string | null
 
   setHeaderActivePanel: (id: string | null) => void
   setBodyActivePanel: (id: string | null) => void
@@ -381,6 +391,7 @@ export interface WorkspaceState {
   setSidebarSection: (s: SidebarSection) => void
   setSidebarPin: (section: 'explorer' | 'git', path: string | undefined) => void
   toggleSidebarSectionHidden: (s: SidebarSection) => void
+  setSidebarWidth: (w: number) => void
 
   addPanel: (panel: Panel) => void
   updatePanel: (id: string, updates: Partial<Panel>, opts?: { skipHistory?: boolean }) => void
@@ -400,6 +411,9 @@ export interface WorkspaceState {
   toggleMinimap: () => void
   toggleOutliner: () => void
   toggleHelp: () => void
+  openCodexToPage: (page: string, term?: string | null) => void
+  enterSandbox: () => void
+  exitSandbox: () => void
   toggleStatusBar: () => void
   toggleChrome: () => void
   // Linked toggle for the top chrome + bottom status bar so Ctrl+\ hides/shows both together.
@@ -506,7 +520,7 @@ export const DEFAULT_KEYBINDINGS: Record<string, string> = {
   'open-wintab-switcher': 'meta+tab',
   'toggle-panel-switcher': 'ctrl+tab',
   'new-terminal': 'ctrl+shift+t',
-  'new-editor': 'ctrl+alt+n',
+  'new-editor': 'ctrl+e',
   'new-region': 'ctrl+alt+r',
   'zoom-in': 'ctrl+=',
   'zoom-out': 'ctrl+-',
@@ -596,6 +610,10 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         browserLazyLoad: false,
         doubleClickToCreate: 'none',
         autoFocusOnCreate: true,
+        autoFocusTerminal: true,
+        autoFocusEditor: true,
+        autoFocusBrowser: true,
+        autoFocusRegion: true,
         defaultTerminalShell: '',
         defaultTerminalShellType: 'remember_last',
         lastSpawnedShellType: null,
@@ -615,7 +633,9 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         canvasBgColor: '',
         customBgColors: {},
         panelGlassOpacity: 0.85,
-        panelGlassBlur: 12
+        panelGlassBlur: 12,
+        onboardingComplete: false,
+        wizardStep: 0
       },
       minimapVisible: true,
       outlinerOpen: false,
@@ -633,6 +653,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       lastFocusedPanelId: null,
       sidebarOpen: false,
       sidebarSection: 'explorer',
+      sidebarWidth: 320,
       sidebarPin: {},
       hiddenSidebarSections: [],
       presetGraveyards: {},
@@ -641,6 +662,9 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       updateAvailable: null,
       updateProgress: null,
       updateStatus: '',
+      sandboxRestoreViewport: null,
+      activeCodexPage: 'canvas-nav',
+      highlightedGlossaryTerm: null,
       annotateMode: false,
       annotateTool: 'freehand',
       annotationsVisible: true,
@@ -669,6 +693,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       toggleSidebar: () => set(state => ({ sidebarOpen: !state.sidebarOpen })),
       setSidebarSection: (s) => set({ sidebarSection: s, sidebarOpen: true }),
       setSidebarPin: (section, path) => set(state => ({ sidebarPin: { ...state.sidebarPin, [section]: path } })),
+      setSidebarWidth: (w) => set({ sidebarWidth: w }),
       toggleSidebarSectionHidden: (s) => set(state => {
         if (s === 'outline') return {}
         const hidden = state.hiddenSidebarSections.includes(s)
@@ -739,7 +764,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             past: [...state.past.slice(-HISTORY_LIMIT + 1), snapshot(state)],
             future: []
           }
-          return { ...base, panels, ...syncActiveTab(state, { panels }, { skipDirty: opts?.skipHistory }) }
+          return { ...base, panels, ...syncActiveTab(state, { panels }) }
         }),
 
       deletePanel: (id) =>
@@ -884,6 +909,95 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       toggleMinimap: () => set((state) => ({ minimapVisible: !state.minimapVisible })),
       toggleOutliner: () => set((state) => ({ outlinerOpen: !state.outlinerOpen })),
       toggleHelp: () => set((state) => ({ helpOpen: !state.helpOpen })),
+      openCodexToPage: (page, term = null) => set({
+        helpOpen: true,
+        activeCodexPage: page,
+        highlightedGlossaryTerm: term
+      }),
+      enterSandbox: () => set((state) => {
+        const restoreViewport = { ...state.viewport }
+        const termId = 'sandbox-terminal'
+        const editId = 'sandbox-editor'
+        const browId = 'sandbox-browser'
+
+        const panels = { ...state.panels }
+        if (!panels[termId]) {
+          panels[termId] = {
+            id: termId,
+            type: 'terminal',
+            title: 'Sandbox Terminal',
+            x: 9600,
+            y: 9800,
+            width: 600,
+            height: 400,
+            settings: { cwd: undefined },
+            createdAt: Date.now(),
+            updatedAt: Date.now()
+          }
+        }
+        if (!panels[editId]) {
+          panels[editId] = {
+            id: editId,
+            type: 'editor',
+            title: 'Sandbox Editor',
+            x: 10250,
+            y: 9600,
+            width: 700,
+            height: 500,
+            settings: {
+              content: `# Sandbox Editor 📝\n\nTry writing some code or notes here!\n\nThis is a temporary sandbox space. You can pan, zoom, and resize panels to get a feel for the canvas.`
+            },
+            createdAt: Date.now(),
+            updatedAt: Date.now()
+          }
+        }
+        if (!panels[browId]) {
+          panels[browId] = {
+            id: browId,
+            type: 'browser',
+            title: 'Sandbox Browser',
+            x: 10250,
+            y: 10150,
+            width: 700,
+            height: 500,
+            settings: { url: 'https://devdocs.io/' },
+            createdAt: Date.now(),
+            updatedAt: Date.now()
+          }
+        }
+
+        setTimeout(() => {
+          window.dispatchEvent(new CustomEvent('wts-smooth-viewport'))
+          get().setViewport({ x: window.innerWidth / 2 - 10000 * 0.75, y: window.innerHeight / 2 - 10000 * 0.75, zoom: 0.75 })
+        }, 50)
+
+        return {
+          sandboxRestoreViewport: restoreViewport,
+          panels,
+          helpOpen: false,
+          ...syncActiveTab(state, { panels })
+        }
+      }),
+      exitSandbox: () => set((state) => {
+        const restore = state.sandboxRestoreViewport
+        const panels = { ...state.panels }
+        delete panels['sandbox-terminal']
+        delete panels['sandbox-editor']
+        delete panels['sandbox-browser']
+
+        if (restore) {
+          setTimeout(() => {
+            window.dispatchEvent(new CustomEvent('wts-smooth-viewport'))
+            get().setViewport(restore)
+          }, 50)
+        }
+
+        return {
+          sandboxRestoreViewport: null,
+          panels,
+          ...syncActiveTab(state, { panels })
+        }
+      }),
       toggleStatusBar: () => set((state) => ({ statusBarVisible: !state.statusBarVisible })),
       toggleChrome: () => set((state) => ({ chromeVisible: !state.chromeVisible })),
       toggleBars: () => set((state) => {
@@ -1939,6 +2053,19 @@ export const useWorkspaceStore = create<WorkspaceState>()(
               cand.panels !== undefined && cand.viewport !== undefined
           })
           if (validTabs.length === 0) return false
+
+          // Apply migrations to imported tabs and panels (scrub retired colors)
+          const RETIRED = new Set(['#d4a017', '#ffd36a', '#ffc517', '#ffbd2e'])
+          const scrub = (c?: string) => (c && RETIRED.has(c.toLowerCase()) ? '' : c)
+          validTabs.forEach(t => {
+            if (t.color) t.color = scrub(t.color)
+            if (t.panels) {
+              Object.values(t.panels).forEach(p => {
+                if (p.color) p.color = scrub(p.color)
+              })
+            }
+          })
+
           // Fall back to first tab if activeTabId points nowhere.
           const activeTabId = validTabs.find(t => t.id === data.activeTabId)?.id || validTabs[0].id
           const active = validTabs.find(t => t.id === activeTabId)!
@@ -1997,6 +2124,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           chromeVisible: state.chromeVisible,
           sidebarOpen: state.sidebarOpen,
           sidebarSection: state.sidebarSection,
+          sidebarWidth: state.sidebarWidth,
           sidebarPin: state.sidebarPin,
           hiddenSidebarSections: state.hiddenSidebarSections,
           prefs: state.prefs,
@@ -2014,7 +2142,8 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         const data = persisted as {
           panels?: Record<string, Panel>; tabs?: WorkspaceTab[];
           canvasPresets?: Record<string, CanvasPreset>;
-          sidebarSection?: string; hiddenSidebarSections?: string[]
+          sidebarSection?: string; hiddenSidebarSections?: string[];
+          viewportBookmarks?: Record<string, unknown>;
         }
         if (data?.panels) {
           Object.values(data.panels).forEach(p => { if (p.color) p.color = scrub(p.color) })

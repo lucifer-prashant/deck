@@ -1,0 +1,367 @@
+.codex-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 12000;
+  background: rgba(8, 10, 15, 0.75);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  animation: codex-fade 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+  padding: 24px;
+}
+
+@keyframes codex-fade {
+  from { opacity: 0; transform: scale(0.99); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.codex-container {
+  width: min(900px, 100%);
+  height: min(650px, 85vh);
+  background: rgba(22, 24, 30, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  box-shadow: 0 32px 80px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(255, 255, 255, 0.02) inset;
+  display: flex;
+  overflow: hidden;
+  color: #e6e8ec;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+/* Sidebar Nav */
+.codex-sidebar {
+  width: 250px;
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(0, 0, 0, 0.15);
+  padding: 24px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+
+.codex-nav-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.codex-section-title {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: rgba(255, 255, 255, 0.35);
+  margin-bottom: 6px;
+  padding-left: 8px;
+}
+
+.codex-nav-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 12px;
+  color: rgba(255, 255, 255, 0.65);
+  font-size: 12.5px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  width: 100%;
+  font-family: inherit;
+}
+
+.codex-nav-btn i {
+  font-size: 14px;
+  opacity: 0.7;
+}
+
+.codex-nav-btn:hover {
+  background: rgba(255, 255, 255, 0.04);
+  color: #fff;
+}
+
+.codex-nav-btn.active {
+  background: rgba(77, 171, 232, 0.1);
+  color: #4dabe8;
+  font-weight: 600;
+}
+
+.codex-nav-btn.active i {
+  opacity: 1;
+}
+
+/* Content Area */
+.codex-content-wrapper {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.codex-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 28px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.codex-logo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #4dabe8;
+}
+
+.codex-close-btn {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  width: 28px;
+  height: 28px;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 18px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+
+.codex-close-btn:hover {
+  background: rgba(220, 38, 38, 0.15);
+  border-color: rgba(220, 38, 38, 0.3);
+  color: #ff8585;
+}
+
+.codex-body {
+  flex: 1;
+  padding: 28px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.codex-page-title {
+  font-size: 22px;
+  font-weight: 800;
+  margin: 0 0 6px 0;
+  letter-spacing: -0.01em;
+}
+
+.codex-page-desc {
+  font-size: 13.5px;
+  color: rgba(255, 255, 255, 0.65);
+  line-height: 1.6;
+  margin: 0;
+}
+
+/* Steps Block */
+.codex-section-title-inline {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #4dabe8;
+  margin: 0 0 12px 0;
+}
+
+.codex-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.codex-step-item {
+  display: flex;
+  gap: 12px;
+  line-height: 1.5;
+  font-size: 13px;
+}
+
+.codex-step-num {
+  width: 20px;
+  height: 20px;
+  background: rgba(77, 171, 232, 0.12);
+  border: 1px solid rgba(77, 171, 232, 0.3);
+  color: #4dabe8;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+/* Interactive Sandbox Trigger */
+.codex-sandbox-box {
+  background: rgba(77, 171, 232, 0.06);
+  border: 1px dashed rgba(77, 171, 232, 0.3);
+  border-radius: 12px;
+  padding: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.codex-sandbox-text {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.7);
+  line-height: 1.4;
+  margin: 0;
+}
+
+.codex-sandbox-btn {
+  background: #4dabe8;
+  border: 1px solid #4dabe8;
+  border-radius: 8px;
+  color: #0c1524;
+  padding: 8px 16px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.codex-sandbox-btn:hover {
+  background: #399cdb;
+  box-shadow: 0 0 16px rgba(77, 171, 232, 0.3);
+}
+
+/* Diagrams */
+.codex-diagram-container {
+  height: 160px;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+/* Shortcut definition lists */
+.codex-shortcuts-list {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px 24px;
+  font-size: 13px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 10px;
+  padding: 16px 20px;
+}
+
+.codex-shortcut-row {
+  display: contents;
+}
+
+.codex-shortcut-label {
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.codex-shortcut-keys {
+  text-align: right;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+kbd.shortcut-chip {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-bottom: 2px solid rgba(255, 255, 255, 0.2);
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: #fff;
+  white-space: nowrap;
+}
+
+/* Glossary Terms */
+.codex-glossary {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.codex-glossary-item {
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 10px;
+  padding: 16px;
+  transition: all 0.2s ease;
+}
+
+.codex-glossary-term {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  font-weight: 700;
+  color: #4dabe8;
+  margin-bottom: 6px;
+}
+
+.codex-glossary-def {
+  font-size: 12.5px;
+  color: rgba(255, 255, 255, 0.65);
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* Keyboard Shortcuts Tab Layout */
+.codex-kb-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.codex-kb-section h4 {
+  margin: 0 0 8px 0;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #4dabe8;
+}
+
+.codex-kb-list {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px 20px;
+  font-size: 12.5px;
+  background: rgba(0, 0, 0, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  border-radius: 8px;
+  padding: 14px 18px;
+}
+
+.codex-kb-row {
+  display: contents;
+}
+
+.codex-kb-label {
+  color: rgba(255, 255, 255, 0.8);
+}

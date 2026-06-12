@@ -9,7 +9,7 @@ import PanelContextMenu from './PanelContextMenu'
 import BrowserPanel from './BrowserPanel'
 import TerminalPanel from './TerminalPanel'
 import EditorPanel from './EditorPanel'
-import { getAnchorPoint, generateWigglyPath, resolveConnectionRoute, generateRoundedPath, generateStraightPath, generateSmoothPath } from '../annotationUtils'
+import { getAnchorPoint, resolveConnectionRoute, generateStraightPath, generateSmoothPath } from '../annotationUtils'
 import './Panel.css'
 
 interface PanelProps {
@@ -373,9 +373,12 @@ const Panel: React.FC<PanelProps> = ({ panel, isSelected, offscreen, annotateMod
     // don't subscribe to the whole object.
     if (panel.type !== 'region' && !panel.pinFront && !panel.pinBack) {
       const allPanels = Object.values(useWorkspaceStore.getState().panels)
-      const maxZ = Math.max(1, ...allPanels.filter(p => !p.pinFront && !p.pinBack).map(p => p.zIndex || 1))
-      if ((panel.zIndex || 1) < maxZ) {
-        updatePanel(panel.id, { zIndex: maxZ + 1 }, { skipHistory: true })
+      const otherZs = allPanels
+        .filter(p => p.id !== panel.id && !p.pinFront && !p.pinBack)
+        .map(p => p.zIndex || 1)
+      const maxOtherZ = otherZs.length > 0 ? Math.max(...otherZs) : 1
+      if (panel.zIndex === undefined || panel.zIndex <= maxOtherZ) {
+        updatePanel(panel.id, { zIndex: maxOtherZ + 1 }, { skipHistory: true })
       }
     }
 
@@ -436,6 +439,13 @@ const Panel: React.FC<PanelProps> = ({ panel, isSelected, offscreen, annotateMod
 
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     if (jumpModeActive || annotateMode) return
+    const target = e.target as HTMLElement
+    const isHeaderOrTabstrip = !!(
+      target.closest('.panel-header') ||
+      target.closest('.panel-stack-tabs') ||
+      target.closest('.browser-tabstrip')
+    )
+    if (!isHeaderOrTabstrip) return
     e.preventDefault()
     e.stopPropagation()
     const s = useWorkspaceStore.getState()
@@ -622,9 +632,9 @@ const Panel: React.FC<PanelProps> = ({ panel, isSelected, offscreen, annotateMod
             finalPositions.forEach((pos, id) => {
               const el = document.querySelector(`.panel[data-panel-id="${id}"]`) as HTMLElement | null
               if (el) {
+                el.style.transform = ''
                 el.style.left = `${pos.x}px`
                 el.style.top = `${pos.y}px`
-                el.style.transform = 'translateZ(0)'
               }
             })
             flushSync(() => {
@@ -698,15 +708,15 @@ const Panel: React.FC<PanelProps> = ({ panel, isSelected, offscreen, annotateMod
             s2.setStackDropTarget(null)
             if (hit && panel.type !== 'region') {
               const el = panelRef.current
-              if (el) el.style.transform = 'translateZ(0)'  // clear drag offset
+              if (el) el.style.transform = ''  // clear drag offset
               s2.stackPanels(hit, [panel.id])
               return
             }
             const el = panelRef.current
             if (el) {
+              el.style.transform = ''
               el.style.left = `${finalX}px`
               el.style.top = `${finalY}px`
-              el.style.transform = 'translateZ(0)'
             }
             flushSync(() => { onMove(panel.id, finalX, finalY) })
             // Region-membership recompute for the moved panel (skip regions).
@@ -802,7 +812,7 @@ const Panel: React.FC<PanelProps> = ({ panel, isSelected, offscreen, annotateMod
               targetEdgePos,
             }
 
-            const route = resolveConnectionRoute(tempAnnotation, currentPanels)
+            const route = resolveConnectionRoute(tempAnnotation, currentPanels, true)
             const pathD = curved === false
               ? generateStraightPath(route)
               : generateSmoothPath(route, 0.22)
@@ -913,9 +923,11 @@ const Panel: React.FC<PanelProps> = ({ panel, isSelected, offscreen, annotateMod
     }
 
     if (isDragging || isResizing) {
+      document.body.classList.add('panel-interacting')
       window.addEventListener('mousemove', handleMouseMove)
       window.addEventListener('mouseup', handleMouseUp)
       return () => {
+        document.body.classList.remove('panel-interacting')
         window.removeEventListener('mousemove', handleMouseMove)
         window.removeEventListener('mouseup', handleMouseUp)
         if (rafId) cancelAnimationFrame(rafId)
@@ -935,9 +947,12 @@ const Panel: React.FC<PanelProps> = ({ panel, isSelected, offscreen, annotateMod
     onSelect(panel.id, additive)
     if (panel.type !== 'region' && !panel.pinFront && !panel.pinBack) {
       const all = Object.values(useWorkspaceStore.getState().panels)
-      const maxZ = Math.max(1, ...all.filter(p => !p.pinFront && !p.pinBack).map(p => p.zIndex || 1))
-      if ((panel.zIndex || 1) < maxZ) {
-        updatePanel(panel.id, { zIndex: maxZ + 1 }, { skipHistory: true })
+      const otherZs = all
+        .filter(p => p.id !== panel.id && !p.pinFront && !p.pinBack)
+        .map(p => p.zIndex || 1)
+      const maxOtherZ = otherZs.length > 0 ? Math.max(...otherZs) : 1
+      if (panel.zIndex === undefined || panel.zIndex <= maxOtherZ) {
+        updatePanel(panel.id, { zIndex: maxOtherZ + 1 }, { skipHistory: true })
       }
     }
   }, [onSelect, panel.id, panel.type, panel.pinFront, panel.pinBack, panel.zIndex, updatePanel])
@@ -968,8 +983,22 @@ const Panel: React.FC<PanelProps> = ({ panel, isSelected, offscreen, annotateMod
   const regionCollapsed = panel.type === 'region' && (panel.settings as { collapsed?: boolean } | undefined)?.collapsed
   // Stack host bits — list of stacked child panels + the currently-active id.
   const isStackHost = !!(panel.stackChildren && panel.stackChildren.length > 0)
-  const allPanelsMap = useWorkspaceStore(s => s.panels)
-  const stackChildren = isStackHost ? (panel.stackChildren || []).map(id => allPanelsMap[id]).filter(Boolean) : []
+  const stackChildren = useWorkspaceStore(
+    useCallback(
+      s => {
+        if (!isStackHost) return []
+        return (panel.stackChildren || []).map(id => s.panels[id]).filter(Boolean)
+      },
+      [isStackHost, panel.stackChildren]
+    ),
+    (a, b) => {
+      if (a.length !== b.length) return false
+      for (let i = 0; i < a.length; i++) {
+        if (a[i] !== b[i]) return false
+      }
+      return true
+    }
+  )
   const stackOrder: PanelType[] = isStackHost ? [panel, ...stackChildren] : []
   const stackActiveId = isStackHost ? (panel.stackActive || panel.id) : panel.id
   const setStackActive = useWorkspaceStore(s => s.setStackActive)
@@ -1051,18 +1080,21 @@ const Panel: React.FC<PanelProps> = ({ panel, isSelected, offscreen, annotateMod
         tabIndex={-1}
       >
         {accent && <div className="panel-accent-bar" style={{ background: accent }} />}
-        <div className="panel-header" onDoubleClick={(e) => {
-          e.stopPropagation()
-          const action = prefs.panelHeaderDoubleClick || 'rename'
-          if (action === 'rename') {
-            beginRename()
-          } else if (action === 'minimize') {
-            updatePanel(panel.id, { minimized: !panel.minimized })
-          } else if (action === 'focus') {
-            useWorkspaceStore.getState().selectPanel(panel.id, false)
-            executeWorkspaceCommand('focus-selected')
-          }
-        }}>
+        <div
+          className="panel-header"
+          onDoubleClick={(e) => {
+            e.stopPropagation()
+            const action = prefs.panelHeaderDoubleClick || 'rename'
+            if (action === 'rename') {
+              beginRename()
+            } else if (action === 'minimize') {
+              updatePanel(panel.id, { minimized: !panel.minimized })
+            } else if (action === 'focus') {
+              useWorkspaceStore.getState().selectPanel(panel.id, false)
+              executeWorkspaceCommand('focus-selected')
+            }
+          }}
+        >
           <span className="panel-type-icon" aria-hidden>{TYPE_ICON[panel.type]}</span>
           {(panel.type === 'terminal' || panel.type === 'browser' || panel.type === 'editor') && panel.healthState && (
             <span
@@ -1331,8 +1363,10 @@ const StackTabButton: React.FC<StackTabBtnProps> = ({ child, active, isHostTab, 
       const s = useWorkspaceStore.getState()
       const p = s.panels[child.id]
       if (!p) return
-      const worldX = (ev.clientX - s.viewport.x) / s.viewport.zoom
-      const worldY = (ev.clientY - s.viewport.y) / s.viewport.zoom
+      const container = document.querySelector('.canvas-container')
+      const rect = container ? container.getBoundingClientRect() : { left: 0, top: 0 }
+      const worldX = (ev.clientX - rect.left - s.viewport.x) / s.viewport.zoom
+      const worldY = (ev.clientY - rect.top - s.viewport.y) / s.viewport.zoom
       // Anchor: cursor sits near the top-center of the panel (where the title is).
       s.movePanel(child.id, worldX - p.width / 2, worldY - 18)
     }
@@ -1380,4 +1414,4 @@ const StackTabButton: React.FC<StackTabBtnProps> = ({ child, active, isHostTab, 
   )
 }
 
-export default Panel
+export default React.memo(Panel)

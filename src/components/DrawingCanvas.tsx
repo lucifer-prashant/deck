@@ -1,7 +1,10 @@
-import React, { useRef, useEffect, useCallback, useMemo } from 'react'
+import React, { useRef, useEffect, useCallback } from 'react'
 import { useWorkspaceStore, Point } from '../store/workspaceStore'
-import { getAnchorPoint, generateWigglyPath, generateArrowhead, resolveConnectionRoute, generateRoundedPath, generateSmoothPath } from '../annotationUtils'
+import { shallow } from 'zustand/shallow'
+import { generateArrowhead, resolveConnectionRoute, generateSmoothPath } from '../annotationUtils'
 import type { Annotation, Panel } from '../store/workspaceStore'
+
+type LayoutPanelMap = Record<string, { id: string; x: number; y: number; width: number; height: number; type: string; minimized?: boolean }>
 
 const MIN_POINTS_FOR_STROKE = 2
 const MARGIN = 400
@@ -13,19 +16,42 @@ function generateId() {
 
 const DrawingCanvas: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const viewport = useWorkspaceStore(s => s.viewport)
+  const viewportZoom = useWorkspaceStore(s => s.viewport.zoom)
+  const canvasBounds = useWorkspaceStore(
+    s => {
+      const v = s.viewport
+      const vw = window.innerWidth
+      const vh = window.innerHeight
+      const ww = vw / v.zoom
+      const wh = vh / v.zoom
+      
+      const STEP = 1000
+      const rawX = -v.x / v.zoom - MARGIN
+      const rawY = -v.y / v.zoom - MARGIN
+      const rawW = ww + MARGIN * 2
+      const rawH = wh + MARGIN * 2
+      
+      const canvasX = Math.floor(rawX / STEP) * STEP
+      const canvasY = Math.floor(rawY / STEP) * STEP
+      const canvasW = Math.ceil((rawX + rawW - canvasX) / STEP) * STEP
+      const canvasH = Math.ceil((rawY + rawH - canvasY) / STEP) * STEP
+      
+      return { canvasX, canvasY, canvasW, canvasH }
+    },
+    shallow
+  )
+  const { canvasX, canvasY, canvasW, canvasH } = canvasBounds
   const annotateMode = useWorkspaceStore(s => s.annotateMode)
   const annotateTool = useWorkspaceStore(s => s.annotateTool)
   const annotationsVisible = useWorkspaceStore(s => s.annotationsVisible)
   const annotationsBehindPanels = useWorkspaceStore(s => s.annotationsBehindPanels)
   const drawColor = useWorkspaceStore(s => s.drawColor)
   const drawStrokeWidth = useWorkspaceStore(s => s.drawStrokeWidth)
-  const panels = useWorkspaceStore(s => s.panels)
   const annotations = useWorkspaceStore(s =>
     s.tabs.find(t => t.id === s.activeTabId)?.annotations || []
   )
 
-  const activePanelsRef = useRef<Record<string, Panel>>(panels)
+  const activePanelsRef = useRef<Record<string, Panel>>(useWorkspaceStore.getState().panels)
   const addAnnotation = useWorkspaceStore(s => s.addAnnotation)
   const deleteAnnotation = useWorkspaceStore(s => s.deleteAnnotation)
 
@@ -49,26 +75,12 @@ const DrawingCanvas: React.FC = () => {
     const container = canvasRef.current?.parentElement?.parentElement
     const rect = container?.getBoundingClientRect()
     if (!rect) return { x: 0, y: 0 }
-    const v = viewport
+    const v = useWorkspaceStore.getState().viewport
     return {
       x: (clientX - rect.left - v.x) / v.zoom,
       y: (clientY - rect.top - v.y) / v.zoom
     }
-  }, [viewport])
-
-  const { canvasW, canvasH, canvasX, canvasY } = useMemo(() => {
-    const vw = window.innerWidth
-    const vh = window.innerHeight
-    const v = viewport
-    const ww = vw / v.zoom
-    const wh = vh / v.zoom
-    return {
-      canvasX: Math.floor(-v.x / v.zoom - MARGIN),
-      canvasY: Math.floor(-v.y / v.zoom - MARGIN),
-      canvasW: Math.ceil(ww + MARGIN * 2),
-      canvasH: Math.ceil(wh + MARGIN * 2)
-    }
-  }, [viewport])
+  }, [])
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current
@@ -91,9 +103,25 @@ const DrawingCanvas: React.FC = () => {
   }, [drawingAnnotations, annotationsVisible, canvasX, canvasY])
 
   useEffect(() => {
-    activePanelsRef.current = panels
+    let lastPanels = useWorkspaceStore.getState().panels
+    activePanelsRef.current = lastPanels
     draw()
-  }, [panels, draw, annotateMode, annotateTool, annotationsVisible, annotations])
+
+    const unsubscribe = useWorkspaceStore.subscribe(
+      (state) => {
+        if (state.panels !== lastPanels) {
+          lastPanels = state.panels
+          activePanelsRef.current = state.panels
+          draw()
+        }
+      }
+    )
+    return unsubscribe
+  }, [draw])
+
+  useEffect(() => {
+    draw()
+  }, [draw, annotateMode, annotateTool, annotationsVisible, annotations])
 
   useEffect(() => {
     const handler = (e: Event) => {
@@ -107,7 +135,7 @@ const DrawingCanvas: React.FC = () => {
     return () => window.removeEventListener('deck:panels-drag', handler)
   }, [draw, drawingAnnotations])
 
-  useEffect(() => { draw() }, [draw, viewport.x, viewport.y, viewport.zoom])
+  useEffect(() => { draw() }, [draw, canvasX, canvasY, viewportZoom])
 
   useEffect(() => {
     const handler = (e: Event) => {
@@ -239,7 +267,7 @@ const DrawingCanvas: React.FC = () => {
               if (bb) ctx.strokeRect(bb.x - 3, bb.y - 3, bb.width + 6, bb.height + 6)
             }
           } else if (hit.type === 'arrow' || hit.type === 'relationship') {
-            const pts = resolveConnectionRoute(hit, activePanelsRef.current as any)
+            const pts = resolveConnectionRoute(hit, activePanelsRef.current as unknown as LayoutPanelMap)
             if (pts.length >= 2) {
               const minX = Math.min(...pts.map(p => p.x)) - 4
               const minY = Math.min(...pts.map(p => p.y)) - 4
@@ -318,7 +346,7 @@ const DrawingCanvas: React.FC = () => {
         startEdgePos: startSnap?.edgePos,
         endEdgePos: endSnap?.edgePos,
       }
-      const path = resolveConnectionRoute(tempAnnotation, activePanelsRef.current as any)
+      const path = resolveConnectionRoute(tempAnnotation, activePanelsRef.current as unknown as LayoutPanelMap)
       const pathStr = generateSmoothPath(path, 0.22)
       ctx.stroke(new Path2D(pathStr))
     } else if (annotateTool === 'rectangle') {
@@ -448,7 +476,7 @@ function hitTest(point: Point, annotations: Annotation[]): Annotation | null {
     }
     if (a.type === 'arrow' || a.type === 'relationship') {
       const panelsState = useWorkspaceStore.getState().panels
-      const pts = resolveConnectionRoute(a, panelsState as any)
+      const pts = resolveConnectionRoute(a, panelsState as unknown as LayoutPanelMap)
       if (pts.length < 2) continue
       const minX = Math.min(...pts.map(p => p.x)) - 6
       const minY = Math.min(...pts.map(p => p.y)) - 6
@@ -515,7 +543,7 @@ function distToSegment(p: Point, a: Point, b: Point): number {
 }
 
 function drawArrow(ctx: CanvasRenderingContext2D, a: Annotation, panels: Record<string, Panel>) {
-  const path = resolveConnectionRoute(a, panels as any)
+  const path = resolveConnectionRoute(a, panels as unknown as LayoutPanelMap)
   if (path.length < 2) return
   const endPt = path[path.length - 1]
   const secondToLast = path[path.length - 2]

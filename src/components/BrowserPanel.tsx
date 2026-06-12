@@ -101,7 +101,8 @@ interface PanelSettings {
 }
 
 const BrowserPanel: React.FC<Props> = ({ panel }) => {
-  const { updatePanel, prefs } = useWorkspaceStore()
+  const updatePanel = useWorkspaceStore(s => s.updatePanel)
+  const prefs = useWorkspaceStore(s => s.prefs)
   const settings = panel.settings as PanelSettings | undefined
   const browserCommand = settings?.browserCommand
   const isLazyLoad = settings?.lazyLoad !== undefined ? settings.lazyLoad : (prefs.browserLazyLoad ?? false)
@@ -192,6 +193,7 @@ const BrowserPanel: React.FC<Props> = ({ panel }) => {
         closedStack.current.push(closed)
         if (closedStack.current.length > CLOSED_STACK_LIMIT) closedStack.current.shift()
       }
+      webviewRefs.current.delete(id)
       const next = ts.filter(t => t.id !== id)
       if (id === activeIdRef.current) {
         const fallback = next[Math.max(0, idx - 1)] || next[0]
@@ -382,6 +384,15 @@ const BrowserPanel: React.FC<Props> = ({ panel }) => {
         if (s.bodyActivePanelId !== panel.id) s.setBodyActivePanel(panel.id)
         if (s.selectedPanelIds.length !== 1 || s.selectedPanelIds[0] !== panel.id) {
           s.selectPanel(panel.id)
+        }
+        if (panel.type !== 'region' && !panel.pinFront && !panel.pinBack) {
+          const otherZs = Object.values(s.panels)
+            .filter(p => p.id !== panel.id && !p.pinFront && !p.pinBack)
+            .map(p => p.zIndex || 1)
+          const maxOtherZ = otherZs.length > 0 ? Math.max(...otherZs) : 1
+          if (panel.zIndex === undefined || panel.zIndex <= maxOtherZ) {
+            s.updatePanel(panel.id, { zIndex: maxOtherZ + 1 }, { skipHistory: true })
+          }
         }
         return
       }
@@ -674,6 +685,7 @@ const WebviewSlot = React.memo<{
     className: 'bp-webview',
     allowpopups: 'true',
     partition,
+    plugins: 'true',
     style: { display: active ? 'flex' : 'none' }
   }
   if (preloadPath) props.preload = preloadPath

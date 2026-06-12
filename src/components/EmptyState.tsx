@@ -11,6 +11,7 @@ const TIPS = [
 	["Ctrl+,", "preferences"],
 	["Ctrl+P", "command palette"],
 	["↑↓←→", "spatial nearest-panel navigation"],
+	["?", "open Codex Help Manual"],
 ]
 
 const EmptyState: React.FC = () => {

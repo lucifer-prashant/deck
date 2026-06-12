@@ -2,7 +2,13 @@ import { ipcRenderer } from 'electron'
 
 // Tell host whenever the user interacts with the embedded page so the host can
 // clear panel-selection glow and other "focus moved into webview" reactions.
-const notifyFocus = () => ipcRenderer.sendToHost('focus-claim')
+let lastFocusTime = 0
+const notifyFocus = () => {
+  const now = Date.now()
+  if (now - lastFocusTime < 100) return
+  lastFocusTime = now
+  ipcRenderer.sendToHost('focus-claim')
+}
 window.addEventListener('mousedown', notifyFocus, true)
 window.addEventListener('focus', notifyFocus, true)
 window.addEventListener('touchstart', notifyFocus, true)
@@ -14,8 +20,10 @@ window.addEventListener('touchstart', notifyFocus, true)
 // We discriminate by URL: 127.0.0.1 / localhost = locally-hosted app guest.
 const isLocalGuest = (() => {
   try {
-    const h = window.location.hostname
-    return h === '127.0.0.1' || h === 'localhost' || h === '::1'
+    const url = new URL(window.location.href)
+    const h = url.hostname
+    const isLocal = h === '127.0.0.1' || h === 'localhost' || h === '::1'
+    return isLocal && url.searchParams.get('isCodeServer') === 'true'
   } catch { return false }
 })()
 

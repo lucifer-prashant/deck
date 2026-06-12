@@ -97,6 +97,14 @@ describe('confirmPanelsDeletion', () => {
     expect(spy).toHaveBeenCalledWith('Delete browser "Chrome"?')
   })
 
+  it('confirms single PDF browser panel', () => {
+    const spy = vi.fn(() => true)
+    vi.stubGlobal('confirm', spy)
+    const panel = makePanel({ type: 'browser', title: 'document.pdf' })
+    confirmPanelsDeletion([panel])
+    expect(spy).toHaveBeenCalledWith('Delete pdf view "document.pdf"?')
+  })
+
   it('confirms multiple panels with state count', () => {
     const spy = vi.fn(() => true)
     vi.stubGlobal('confirm', spy)

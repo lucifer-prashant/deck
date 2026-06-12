@@ -36,7 +36,8 @@ const fileLabel = (f: GitFile): string => {
   return UNSTAGED_CODES[f.unstaged] || f.unstaged
 }
 
-const fileGroup = (f: GitFile): 'staged' | 'changed' | 'untracked' => {
+const fileGroup = (f: GitFile): 'staged' | 'changed' | 'untracked' | 'ignored' => {
+  if (f.staged === '!' || f.unstaged === '!') return 'ignored'
   if (f.staged === '?' && f.unstaged === '?') return 'untracked'
   if (f.staged !== ' ' && f.staged !== '?') return 'staged'
   return 'changed'

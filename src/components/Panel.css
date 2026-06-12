@@ -924,3 +924,25 @@
   opacity: 1;
   color: #4dabe8;
 }
+
+/* Disable pointer events on panels (including webviews) during canvas/panel operations
+   to prevent webviews/iframes from swallowing mouseup/mousemove events. */
+.canvas-container.selection-active .panel,
+.canvas-container.grabbing .panel,
+body.panel-interacting .panel:not(.dragging) {
+  pointer-events: none !important;
+}
+
+/* Visual Flash highlight animation */
+.visual-flash {
+  animation-name: visual-flash-pulse;
+  animation-duration: 800ms;
+  animation-iteration-count: 2; /* 1.6 seconds total duration */
+  animation-fill-mode: forwards;
+}
+
+@keyframes visual-flash-pulse {
+  0%   { box-shadow: 0 0 0 4px rgba(77, 171, 232, 0.9); }
+  100% { box-shadow: 0 0 0 0px rgba(77, 171, 232, 0); }
+}
+

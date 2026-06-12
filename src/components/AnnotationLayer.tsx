@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { useWorkspaceStore, Annotation } from "../store/workspaceStore"
-import { getAnchorPoint, generateWigglyPath, resolveConnectionRoute, generateRoundedPath, generateStraightPath, generateSmoothPath } from "../annotationUtils"
+import { getAnchorPoint, resolveConnectionRoute, generateStraightPath, generateSmoothPath } from "../annotationUtils"
 import "./AnnotationLayer.css"
 
 const STICKY_COLORS = [
@@ -78,14 +78,12 @@ function formatMarkdown(text: string): React.ReactNode[] {
 }
 
 const AnnotationLayer: React.FC = () => {
-	const activeTabId = useWorkspaceStore((s) => s.activeTabId)
 	const annotations = useWorkspaceStore(
-		(s) => s.tabs.find((t) => t.id === activeTabId)?.annotations || [],
+		(s) => s.tabs.find((t) => t.id === s.activeTabId)?.annotations || [],
 	)
 	const annotationsBehindPanels = useWorkspaceStore(
 		(s) => s.annotationsBehindPanels,
 	)
-	const panels = useWorkspaceStore((s) => s.panels)
 
 	const domAnnotations = annotations.filter((a) => !DRAWING_TYPES.has(a.type))
 	const relationships = annotations.filter((a) => a.type === "relationship")
@@ -119,7 +117,6 @@ const AnnotationLayer: React.FC = () => {
 					<RelationshipLine
 						key={a.id}
 						annotation={a}
-						panels={panels}
 						onDelete={() => useWorkspaceStore.getState().deleteAnnotation(a.id)}
 					/>
 				))}
@@ -136,10 +133,14 @@ const PORT_RADIUS = 6
 const ArrowPorts: React.FC = () => {
   const annotateMode = useWorkspaceStore(s => s.annotateMode)
   const annotateTool = useWorkspaceStore(s => s.annotateTool)
-  const panels = useWorkspaceStore(s => s.panels)
 
   if (!annotateMode || annotateTool !== 'arrow') return null
 
+  return <ArrowPortsActive />
+}
+
+const ArrowPortsActive: React.FC = () => {
+  const panels = useWorkspaceStore(s => s.panels)
   const onPortDown = (panelId: string, anchor: string, edgePos: number) => (e: React.MouseEvent) => {
     e.stopPropagation()
     e.preventDefault()
@@ -195,23 +196,23 @@ const ArrowPorts: React.FC = () => {
 
 const RelationshipLine: React.FC<{
 	annotation: Annotation
-	panels: Record<
-		string,
-		{ id: string; x: number; y: number; width: number; height: number; type: 'terminal' | 'editor' | 'browser' | 'region'; minimized?: boolean; detached?: boolean }
-	>
 	onDelete: () => void
-}> = ({ annotation: a, panels, onDelete }) => {
+}> = React.memo(({ annotation: a, onDelete }) => {
 	if (!a.sourcePanelId || !a.targetPanelId) return null
-	const src = panels[a.sourcePanelId]
-	const tgt = panels[a.targetPanelId]
+	const src = useWorkspaceStore(s => s.panels[a.sourcePanelId!])
+	const tgt = useWorkspaceStore(s => s.panels[a.targetPanelId!])
 	if (!src || !tgt) return null
+
+	// Subscribe to active tab's lastEditedAt to trigger a re-route when any panel finishes dragging
+	useWorkspaceStore(s => s.tabs.find(t => t.id === s.activeTabId)?.lastEditedAt)
 
 	const srcPt = getAnchorPoint(src, a.sourceAnchor || "center", a.sourceEdgePos ?? 0.5)
 	const tgtPt = getAnchorPoint(tgt, a.targetAnchor || "center", a.targetEdgePos ?? 0.5)
 	const broken = a.broken || src.detached || tgt.detached
 
 	// Unify routing using the shared resolveConnectionRoute to route around panels
-	const route = resolveConnectionRoute(a, panels)
+	const panels = useWorkspaceStore.getState().panels
+	const route = resolveConnectionRoute(a, panels as any)
 	const pathD = a.curved === false
 		? generateStraightPath(route)
 		: generateSmoothPath(route, 0.22)
@@ -273,7 +274,7 @@ const RelationshipLine: React.FC<{
 			)}
 		</g>
 	)
-}
+})
 
 function contrastColor(bg: string): string {
 	const m = bg.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/)
@@ -360,14 +361,13 @@ type ResizeDir = 'se' | 'sw' | 'ne' | 'nw' | 'n' | 's' | 'e' | 'w'
 
 const ImageNode: React.FC<{
   annotation: Annotation
-  view: { zoom: number }
   imgSrc: string
   onUpdate: (upd: Partial<Annotation>) => void
   onSelect: () => void
   onContextMenu: (e: React.MouseEvent) => void
   isSelected: boolean
   jumpActive: boolean
-}> = ({ annotation: a, view, imgSrc, onUpdate, onSelect, onContextMenu, isSelected, jumpActive }) => {
+}> = React.memo(({ annotation: a, imgSrc, onUpdate, onSelect, onContextMenu, isSelected, jumpActive }) => {
   const dragRef = useRef<{ sx: number; sy: number; ox: number; oy: number; origins?: Array<{ id: string; x: number; y: number }>; isMulti?: boolean } | null>(null)
   const resizeRef = useRef<{ sx: number; sy: number; ox: number; oy: number; ow: number; oh: number; dir: ResizeDir } | null>(null)
 
@@ -398,8 +398,9 @@ const ImageNode: React.FC<{
     const move = (ev: PointerEvent) => {
       const d = dragRef.current
       if (!d) return
-      const dx = (ev.clientX - d.sx) / view.zoom
-      const dy = (ev.clientY - d.sy) / view.zoom
+      const zoom = useWorkspaceStore.getState().viewport.zoom
+      const dx = (ev.clientX - d.sx) / zoom
+      const dy = (ev.clientY - d.sy) / zoom
       if (d.isMulti && d.origins) {
         const s = useWorkspaceStore.getState()
         d.origins.forEach(o => s.updateAnnotation(o.id, { x: o.x + dx, y: o.y + dy }))
@@ -424,8 +425,9 @@ const ImageNode: React.FC<{
     const move = (ev: PointerEvent) => {
       const d = resizeRef.current
       if (!d) return
-      const dx = (ev.clientX - d.sx) / view.zoom
-      const dy = (ev.clientY - d.sy) / view.zoom
+      const zoom = useWorkspaceStore.getState().viewport.zoom
+      const dx = (ev.clientX - d.sx) / zoom
+      const dy = (ev.clientY - d.sy) / zoom
       let nw = d.ow, nh = d.oh, nx = d.ox, ny = d.oy
       if (d.dir.includes('e')) nw = Math.max(40, d.ow + dx)
       if (d.dir.includes('w')) { nw = Math.max(40, d.ow - dx); nx = d.ox + (d.ow - nw) }
@@ -466,9 +468,9 @@ const ImageNode: React.FC<{
       ))}
     </div>
   )
-}
+})
 
-const AnnotationNode: React.FC<{ annotation: Annotation }> = ({
+const AnnotationNode: React.FC<{ annotation: Annotation }> = React.memo(({
 	annotation: a,
 }) => {
 	const update = useWorkspaceStore((s) => s.updateAnnotation)
@@ -476,7 +478,6 @@ const AnnotationNode: React.FC<{ annotation: Annotation }> = ({
 	const selectAnnotation = useWorkspaceStore((s) => s.selectAnnotation)
 	const selectedAnnotationIds = useWorkspaceStore((s) => s.selectedAnnotationIds)
 	const jumpActive = useWorkspaceStore((s) => s.jumpMode.active)
-	const viewport = useWorkspaceStore((s) => s.viewport)
 	const [editing, setEditing] = useState(a.text.trim() === "")
 	const [text, setText] = useState(a.text)
 	const [showColors, setShowColors] = useState(false)
@@ -539,8 +540,9 @@ const AnnotationNode: React.FC<{ annotation: Annotation }> = ({
 		const onMove = (ev: MouseEvent) => {
 			const d = dragRef.current
 			if (!d) return
-			const dx = (ev.clientX - d.startX) / viewport.zoom
-			const dy = (ev.clientY - d.startY) / viewport.zoom
+			const zoom = useWorkspaceStore.getState().viewport.zoom
+			const dx = (ev.clientX - d.startX) / zoom
+			const dy = (ev.clientY - d.startY) / zoom
 			if (multiOriginsRef.current.length > 1) {
 				multiOriginsRef.current.forEach(({ id, x, y }) => {
 					update(id, { x: x + dx, y: y + dy })
@@ -594,7 +596,7 @@ const AnnotationNode: React.FC<{ annotation: Annotation }> = ({
 		const src = a.filename
 		if (!src) return null
 		const imgSrc =
-			src.startsWith("http") || src.startsWith("data:")
+			src.startsWith("http") || src.startsWith("data:") || src.startsWith("local-file:")
 				? src
 				: `deck-asset://${src}`
 		return (
@@ -604,7 +606,6 @@ const AnnotationNode: React.FC<{ annotation: Annotation }> = ({
 			)}
 			<ImageNode
 				annotation={a}
-				view={viewport}
 				imgSrc={imgSrc}
 				isSelected={selectedAnnotationIds.includes(a.id)}
 				jumpActive={jumpActive}
@@ -676,8 +677,9 @@ const AnnotationNode: React.FC<{ annotation: Annotation }> = ({
 							e.preventDefault()
 							const start = { sx: e.clientX, sy: e.clientY, ox: a.x, oy: a.y, ow: lw, oh: lh }
 							const move = (ev: PointerEvent) => {
-								const dx = (ev.clientX - start.sx) / viewport.zoom
-								const dy = (ev.clientY - start.sy) / viewport.zoom
+								const zoom = useWorkspaceStore.getState().viewport.zoom
+								const dx = (ev.clientX - start.sx) / zoom
+								const dy = (ev.clientY - start.sy) / zoom
 								let nw = start.ow, nh = start.oh, nx = start.ox, ny = start.oy
 								if (dir.includes('e')) nw = Math.max(40, start.ow + dx)
 								if (dir.includes('w')) { nw = Math.max(40, start.ow - dx); nx = start.ox + (start.ow - nw) }
@@ -775,6 +777,7 @@ const AnnotationNode: React.FC<{ annotation: Annotation }> = ({
 		{pickerEl}
 		</>
 	)
-}
+})
 
 export default React.memo(AnnotationLayer)
+

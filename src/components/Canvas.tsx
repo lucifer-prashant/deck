@@ -7,7 +7,7 @@ import { confirmPanelsDeletion } from '../panelDeletion'
 import AnnotationLayer from './AnnotationLayer'
 import DrawingCanvas from './DrawingCanvas'
 import AnnotateToolbar from './AnnotateToolbar'
-import { executeWorkspaceCommand, getPanelDefaults, focusPanelById } from '../workspaceCommands'
+import { executeWorkspaceCommand, getPanelDefaults, focusPanelById, shouldAutoFocusPanel } from '../workspaceCommands'
 import './Canvas.css'
 
 const MIN_ZOOM = 0.1
@@ -142,6 +142,7 @@ const Canvas: React.FC = () => {
       return
     }
     if (e.target === containerRef.current || e.target === contentRef.current || (e.target as HTMLElement).closest('.canvas-content') === contentRef.current) {
+      if (e.button !== 0) return // Only left-click starts normal pan/select
       // Don't pan when clicking on annotation elements — they handle their own drag.
       if ((e.target as HTMLElement).closest('.anno-image, .anno-sticky, .anno-label')) return
       // Clear annotation selection on any empty-canvas click.
@@ -161,7 +162,7 @@ const Canvas: React.FC = () => {
     }
   }, [viewport.x, viewport.y, clearSelection])
 
-  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+  const handleMouseMove = useCallback((e: React.MouseEvent | MouseEvent) => {
     const rect = containerRef.current?.getBoundingClientRect()
     if (rect) {
       const screenX = e.clientX - rect.left
@@ -236,6 +237,33 @@ const Canvas: React.FC = () => {
     }
     setIsPanning(false)
   }, [panels, selectMultiple, selectionBox, viewport])
+
+  const handleMouseMoveRef = useRef(handleMouseMove)
+  const handleMouseUpRef = useRef(handleMouseUp)
+  useEffect(() => {
+    handleMouseMoveRef.current = handleMouseMove
+    handleMouseUpRef.current = handleMouseUp
+  })
+
+  const hasSelectionBox = !!selectionBox
+  useEffect(() => {
+    if (!hasSelectionBox && !isPanning) return
+
+    const onMouseMove = (e: MouseEvent) => {
+      handleMouseMoveRef.current(e)
+    }
+
+    const onMouseUp = () => {
+      handleMouseUpRef.current()
+    }
+
+    window.addEventListener('mousemove', onMouseMove)
+    window.addEventListener('mouseup', onMouseUp)
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove)
+      window.removeEventListener('mouseup', onMouseUp)
+    }
+  }, [hasSelectionBox, isPanning])
 
   // These are thin stable references — panel event handlers pass them as props.
   // Using the store actions directly since they are stable references from Zustand.
@@ -562,7 +590,10 @@ const Canvas: React.FC = () => {
     }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ;(window as any).electronAPI?.onTouchpadPinch?.(handler)
+    const cleanup = (window as any).electronAPI?.onTouchpadPinch?.(handler)
+    return () => {
+      if (cleanup) cleanup()
+    }
   }, [zoomAtViewportPoint])
 
   // Paste onto canvas — image or text, at cursor position.
@@ -677,22 +708,77 @@ const Canvas: React.FC = () => {
     if (customData) {
       e.preventDefault()
       try {
-        const { path, isDir } = JSON.parse(customData)
-        if (!isDir) {
+        const parsed = JSON.parse(customData)
+        const items = parsed.items ? (parsed.items as Array<{ path: string; isDir: boolean }>) : [parsed]
+        if (items && items.length > 0) {
           const rect = containerRef.current?.getBoundingClientRect()
           const dropX = rect ? (e.clientX - rect.left - viewport.x) / viewport.zoom : 100
           const dropY = rect ? (e.clientY - rect.top - viewport.y) / viewport.zoom : 100
-          const name = path.split('/').pop() || 'editor'
-          const id = `panel-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
-          
-          useWorkspaceStore.getState().addPanel({
-            id, type: 'editor',
-            x: dropX - 400, y: dropY - 250, width: 800, height: 500,
-            title: name,
-            settings: { filePath: path, folderPath: path.replace(/\/[^/]*$/, '') },
-            createdAt: Date.now()
+          const cols = Math.ceil(Math.sqrt(items.length))
+          const GAP = 24
+
+          items.forEach((item, idx) => {
+            const row = Math.floor(idx / cols)
+            const col = idx % cols
+            const path = item.path
+            const isDir = item.isDir
+            const name = path.split('/').filter(Boolean).pop() || ''
+            const ext = name.split('.').pop()?.toLowerCase() || ''
+            const isImage = ['png', 'jpg', 'jpeg', 'svg', 'webp', 'gif'].includes(ext) && !isDir
+            const isPdf = ext === 'pdf' && !isDir
+
+            if (isImage) {
+              const iw = 320, ih = 240
+              const x = dropX + col * (iw + GAP) - (items.length === 1 ? iw / 2 : 0)
+              const y = dropY + row * (ih + GAP) - (items.length === 1 ? ih / 2 : 0)
+              const id = `anno-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 5)}`
+              useWorkspaceStore.getState().addAnnotation({
+                id, type: 'image',
+                x, y, width: iw, height: ih,
+                text: '', color: '', filename: `local-file://${path}`,
+                title: name
+              })
+              useWorkspaceStore.getState().selectAnnotation(id)
+            } else {
+              let panelType: 'editor' | 'terminal' | 'browser' = 'editor'
+              let w = 800, h = 500
+              let settings: Record<string, unknown> = {}
+
+              if (isDir) {
+                panelType = 'terminal'
+                w = 600
+                h = 400
+                settings = { cwd: path }
+              } else if (isPdf) {
+                panelType = 'browser'
+                w = 720
+                h = 560
+                settings = {
+                  browserTabs: [{ id: `bt-${Date.now()}-${idx}`, url: `local-file://${path}`, title: name, zoom: 0 }],
+                  browserActiveTabId: `bt-${Date.now()}-${idx}`,
+                  kiosk: true
+                }
+              } else {
+                panelType = 'editor'
+                w = 800
+                h = 500
+                settings = { filePath: path, folderPath: path.replace(/\/[^/]*$/, '') }
+              }
+
+              const x = dropX + col * (w + GAP) - (items.length === 1 ? w / 2 : 0)
+              const y = dropY + row * (h + GAP) - (items.length === 1 ? h / 2 : 0)
+
+              const id = `panel-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 5)}`
+              useWorkspaceStore.getState().addPanel({
+                id, type: panelType,
+                x, y, width: w, height: h,
+                title: panelType === 'editor' ? 'Editor' : name,
+                settings,
+                createdAt: Date.now()
+              })
+              useWorkspaceStore.getState().selectPanel(id)
+            }
           })
-          useWorkspaceStore.getState().selectPanel(id)
           return
         }
       } catch (err) {
@@ -774,7 +860,7 @@ const Canvas: React.FC = () => {
   return (
     <div
       ref={containerRef}
-      className={`canvas-container bg-${prefs.canvasGridStyle ?? 'none'} ${isPanning ? 'grabbing' : ''} ${annotateMode ? `annotating annotate-${annotateTool}` : ''}`}
+      className={`canvas-container bg-${prefs.canvasGridStyle ?? 'none'} ${isPanning ? 'grabbing' : ''} ${selectionBox ? 'selection-active' : ''} ${annotateMode ? `annotating annotate-${annotateTool}` : ''}`}
       style={{
         backgroundImage: prefs.canvasBgImage ? `url(${prefs.canvasBgImage})` : undefined,
         backgroundSize: prefs.canvasBgImage ? 'cover' : undefined,
@@ -835,7 +921,7 @@ const Canvas: React.FC = () => {
         addPanel(newPanel)
         selectPanel(id)
 
-        if (prefs.autoFocusOnCreate !== false) {
+        if (shouldAutoFocusPanel(option)) {
           setTimeout(() => {
             focusPanelById(id)
           }, 50)

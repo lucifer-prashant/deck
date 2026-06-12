@@ -71,7 +71,7 @@ const getSpawnPosition = (width: number, height: number) => {
   }
 }
 
-export const createPanelAtViewportCenter = (type: Panel['type'], settings?: Record<string, any>) => {
+export const createPanelAtViewportCenter = (type: Panel['type'], settings?: Record<string, unknown>) => {
   const defaults = getPanelDefaults(type)
   const position = getSpawnPosition(defaults.width, defaults.height)
   const id = `${type}-${Date.now()}`
@@ -88,11 +88,23 @@ export const createPanelAtViewportCenter = (type: Panel['type'], settings?: Reco
   store.addPanel(panel)
   store.selectPanel(id)
 
-  if (store.prefs.autoFocusOnCreate !== false) {
+  if (shouldAutoFocusPanel(type)) {
     setTimeout(() => {
       focusPanelById(id)
     }, 50)
   }
+}
+
+export const shouldAutoFocusPanel = (type: Panel['type']): boolean => {
+  const store = useWorkspaceStore.getState()
+  if (store.prefs.autoFocusOnCreate === false) return false
+
+  if (type === 'terminal') return store.prefs.autoFocusTerminal !== false
+  if (type === 'editor') return store.prefs.autoFocusEditor !== false
+  if (type === 'browser') return store.prefs.autoFocusBrowser !== false
+  if (type === 'region') return store.prefs.autoFocusRegion !== false
+
+  return true
 }
 
 // Shared bounding-box computation used by both getPanelBounds and fitItemsToViewport.
@@ -122,7 +134,7 @@ export const focusPanelById = (id: string) => {
 
   flagSmoothViewport()
   // Sidebar is a fixed overlay — when open, usable width shrinks.
-  const sidebarW = store.sidebarOpen ? 320 : 0
+  const sidebarW = store.sidebarOpen ? store.sidebarWidth : 0
   const padX = 40
   // Dynamic vertical padding — accounts for chrome/status bar visibility.
   const chromePad = store.chromeVisible ? 44 : 8
@@ -447,7 +459,7 @@ export const executeWorkspaceCommand = (command: WorkspaceCommand) => {
       flagSmoothViewport()
       const s = useWorkspaceStore.getState()
       // Sidebar is a fixed overlay — when open, usable width shrinks.
-      const sidebarW = s.sidebarOpen ? 320 : 0
+      const sidebarW = s.sidebarOpen ? s.sidebarWidth : 0
       const padX = 40
       // Dynamic vertical padding — accounts for chrome/status bar visibility.
       // In focus mode both are hidden, so we get the full viewport.

@@ -72,7 +72,7 @@ const ShellSwitchConfirmDialog: React.FC<ShellSwitchConfirmDialogProps> = ({
             style={{ cursor: 'pointer' }}
           />
           <label htmlFor="dont-ask-switch" style={{ fontSize: 11, opacity: 0.7, cursor: 'pointer' }}>
-            Don't ask again
+            Don&apos;t ask again
           </label>
         </div>
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 4 }}>

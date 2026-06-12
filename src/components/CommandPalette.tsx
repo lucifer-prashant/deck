@@ -54,7 +54,35 @@ const CommandPalette: React.FC = () => {
   // Subscribe only to what affects rendering — actions read via getState() inside callbacks.
   const commandPaletteOpen = useWorkspaceStore(s => s.commandPaletteOpen)
   const toggleCommandPalette = useWorkspaceStore(s => s.toggleCommandPalette)
-  const theme = useWorkspaceStore(s => s.theme)
+  const prefs = useWorkspaceStore(s => s.prefs)
+  const systemIsLight = window.matchMedia('(prefers-color-scheme: light)').matches
+  const theme = useMemo(() => {
+    const gridFallbacks: Record<string, string> = {
+      none: systemIsLight ? '#f5f6f8' : '#1f2024',
+      grid: systemIsLight ? '#f5f6f8' : '#1f2024',
+      dot: systemIsLight ? '#f5f6f8' : '#1f2024',
+      blueprint: '#182848',
+      neon: '#0d0e15'
+    }
+    const color = prefs.canvasBgColor || gridFallbacks[prefs.canvasGridStyle ?? 'none'] || (systemIsLight ? '#f5f6f8' : '#1f2024')
+    if (color.toLowerCase() === '#1f2024' || color.toLowerCase() === '#0d1117') return 'midnight'
+    
+    const cleanHex = color.replace('#', '')
+    let r = 31, g = 32, b = 36
+    if (cleanHex.length === 6) {
+      const num = parseInt(cleanHex, 16)
+      r = (num >> 16) & 255
+      g = (num >> 8) & 255
+      b = num & 255
+    } else if (cleanHex.length === 3) {
+      r = parseInt(cleanHex[0] + cleanHex[0], 16)
+      g = parseInt(cleanHex[1] + cleanHex[1], 16)
+      b = parseInt(cleanHex[2] + cleanHex[2], 16)
+    }
+
+    const hsp = Math.sqrt(0.299 * (r * r) + 0.587 * (g * g) + 0.114 * (b * b))
+    return hsp > 155 ? 'light' : 'dark'
+  }, [prefs.canvasBgColor, prefs.canvasGridStyle, systemIsLight])
 
   const previousActiveElement = useRef<HTMLElement | null>(null)
 
@@ -121,8 +149,21 @@ const CommandPalette: React.FC = () => {
       { id: 'zoom-out', label: 'Zoom Out', category: 'View', shortcut: 'Ctrl+-', run: wc('zoom-out') },
       { id: 'toggle-minimap', label: 'Toggle Minimap', category: 'View', shortcut: 'M', run: wc('toggle-minimap') },
       { id: 'toggle-sidebar', label: 'Toggle Sidebar', category: 'View', shortcut: 'Ctrl+Shift+B', run: () => store().toggleSidebar() },
-      { id: 'toggle-help', label: 'Show Keyboard Shortcuts', category: 'View', shortcut: '?', run: () => store().toggleHelp() },
-      { id: 'cycle-theme', label: `Theme — ${theme} (cycle)`, category: 'View', glyph: '◐', shortcut: 'Ctrl+Shift+T', run: () => store().cycleTheme() },
+      { id: 'toggle-help', label: 'Show Codex Manual', category: 'View', shortcut: '?', run: () => store().toggleHelp() },
+      { id: 'cycle-theme', label: `Theme — ${theme} (cycle)`, category: 'View', glyph: '◐', shortcut: 'Ctrl+Shift+T', run: () => {
+        const currentTheme = theme
+        let nextColor = '#1f2024'
+        if (currentTheme === 'midnight') {
+          nextColor = '#ffffff'
+        } else if (currentTheme === 'light') {
+          nextColor = '#0b132b'
+        } else {
+          nextColor = '#1f2024'
+        }
+        const s = useWorkspaceStore.getState()
+        s.updatePrefs({ canvasBgColor: nextColor })
+        window.__updateDynamicTheme?.(nextColor)
+      } },
       { id: 'toggle-chrome', label: 'Toggle Top Bar', category: 'View', shortcut: 'Ctrl+\\', run: () => store().toggleChrome() },
       // Workspace
       { id: 'mark-saved', label: 'Mark Canvas as Saved', category: 'Workspace', shortcut: 'Ctrl+Alt+S', run: () => store().markTabSaved() },
